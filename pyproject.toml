@@ -1,0 +1,21 @@
+[project]
+name = "reddit-migration"
+version = "1.0.0"
+description = "Migrate saved Reddit items between two accounts, with OAuth tokens stored in GNOME Keyring."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "praw>=7.7",
+    "SecretStorage>=3.3",
+    "tomli>=2.0; python_version < '3.11'",
+]
+
+[project.scripts]
+reddit_migration = "reddit_migration.cli:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["reddit_migration"]

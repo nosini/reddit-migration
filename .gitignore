@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# Local runtime output — never commit tokens or migration state
+migrated_sources.json
+migrated_sources*.json
+*.tmp
+
+# Local config (subreddit lists / source domains are personal, not repo defaults)
+config.toml
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
