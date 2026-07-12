@@ -91,3 +91,7 @@ durable place to set things.
 Environment variables still override the keyring if set:
 `REDDIT_CLIENT_ID`, `REDDIT_USER_AGENT`, `REDDIT_ACCOUNT1_REFRESH_TOKEN`,
 `REDDIT_ACCOUNT2_REFRESH_TOKEN`.
+
+## License
+
+[AGPL-3.0-or-later](LICENSE).

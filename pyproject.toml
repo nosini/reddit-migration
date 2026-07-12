@@ -3,6 +3,8 @@ name = "reddit-migration"
 version = "1.0.0"
 description = "Migrate saved Reddit items between two accounts, with OAuth tokens stored in GNOME Keyring."
 readme = "README.md"
+license = "AGPL-3.0-or-later"
+license-files = ["LICENSE"]
 requires-python = ">=3.9"
 dependencies = [
     "praw>=7.7",
@@ -14,7 +16,7 @@ dependencies = [
 reddit_migration = "reddit_migration.cli:main"
 
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
