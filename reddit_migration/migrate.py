@@ -202,6 +202,7 @@ def migrate_one(
     skip_subreddits: set,
     only_subreddits: set,
     allowed_domains: set,
+    skip_comments: bool = False,
     dry_run: bool = False,
 ) -> tuple[bool, str]:
     """Process one saved item.
@@ -210,6 +211,9 @@ def migrate_one(
     actually migrated (external-source or reddit outcome), False for skips.
     """
     fullname, permalink, kind = item_meta(item)
+
+    if skip_comments and kind == "comment":
+        return False, f"skip {fullname} (comment)"
 
     # item.subreddit works for both submissions and comments.
     subreddit = item.subreddit.display_name.lower()
@@ -281,6 +285,7 @@ def run_migrate(args) -> int:
     skip_subreddits = set(SKIP_SUBREDDITS) | cfg.skip | _split_csv(getattr(args, "skip", ""))
     only_subreddits = set(ONLY_SUBREDDITS) | cfg.only | _split_csv(getattr(args, "only", ""))
     allowed_domains = set(cfg.source_domains) | _split_csv(getattr(args, "source_domain", ""))
+    skip_comments = cfg.skip_comments or getattr(args, "skip_comments", False)
 
     print(f"Source domains: {', '.join(sorted(allowed_domains)) or '(none)'}")
 
@@ -307,6 +312,7 @@ def run_migrate(args) -> int:
                 skip_subreddits,
                 only_subreddits,
                 allowed_domains,
+                skip_comments=skip_comments,
                 dry_run=args.dry_run,
             )
             print(message)

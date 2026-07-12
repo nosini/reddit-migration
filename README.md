@@ -58,6 +58,9 @@ or `$REDDIT_MIGRATION_CONFIG`.
 only = ["pics", "art"]        # if non-empty, ONLY these are processed
 skip = ["announcements"]      # always skipped (wins over `only`)
 
+[items]
+skip_comments = false         # true: skip saved comments, migrate only submissions
+
 [sources]
 domains = ["pixiv.net", "danbooru.donmai.us", "gelbooru.com"]
 ```
@@ -84,6 +87,7 @@ durable place to set things.
 | `--state-file PATH` | JSON vault for external sources (default `migrated_sources.json`) |
 | `--sleep SECS` | delay between API calls (default 1.0) |
 | `--dry-run` | print actions without changing anything |
+| `--skip-comments` | skip saved comments; only migrate submissions |
 | `--only a,b` | subreddit whitelist (unions with config + built-in) |
 | `--skip a,b` | subreddit blacklist (unions with config + built-in) |
 | `--source-domain a,b` | source domains (unions with config domains) |

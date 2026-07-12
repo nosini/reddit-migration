@@ -33,6 +33,11 @@ only = []
 # (If a subreddit is in both lists, it is skipped.)
 skip = []
 
+[items]
+# Skip saved comments entirely; only submissions are migrated.
+# (The --skip-comments flag turns this on regardless of the config.)
+skip_comments = false
+
 [sources]
 # External source domains. A saved post/comment that links to one of these
 # domains (or a subdomain of it) is recorded in the local JSON vault instead
@@ -57,6 +62,7 @@ class Config:
     only: set = field(default_factory=set)
     skip: set = field(default_factory=set)
     source_domains: set = field(default_factory=lambda: set(DEFAULT_SOURCE_DOMAINS))
+    skip_comments: bool = False
 
 
 def _as_set(value) -> set:
@@ -85,6 +91,9 @@ def load_config(explicit: Optional[str] = None) -> Config:
     subs = data.get("subreddits", {})
     cfg.only = _as_set(subs.get("only"))
     cfg.skip = _as_set(subs.get("skip"))
+
+    items = data.get("items", {})
+    cfg.skip_comments = bool(items.get("skip_comments", False))
 
     sources = data.get("sources", {})
     domains = sources.get("domains")

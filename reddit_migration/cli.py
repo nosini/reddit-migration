@@ -37,6 +37,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--state-file", default=os.environ.get("MIGRATION_STATE_FILE", "migrated_sources.json"))
     p.add_argument("--sleep", type=float, default=float(os.environ.get("MIGRATION_SLEEP_SECS", "1.0")))
     p.add_argument("--dry-run", action="store_true", help="Do not save/unsave anything; only print actions.")
+    p.add_argument(
+        "--skip-comments",
+        action="store_true",
+        help="Skip saved comments; only migrate submissions.",
+    )
     p.add_argument("--only", default="", help="Comma-separated subreddit whitelist (unions with config + built-in).")
     p.add_argument("--skip", default="", help="Comma-separated subreddit blacklist (unions with config + built-in).")
     p.add_argument("--source-domain", default="", help="Comma-separated source domains (unions with config domains).")
