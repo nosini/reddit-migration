@@ -63,7 +63,21 @@ skip_comments = false         # true: skip saved comments, migrate only submissi
 
 [sources]
 domains = ["pixiv.net", "danbooru.donmai.us", "gelbooru.com"]
+
+[state]
+file = ""                     # external-source vault location; "" = default (see below)
 ```
+
+After upgrading, `reddit_migration --update-config` regenerates the config
+with the latest template — existing values are kept, options added since the
+file was written appear with their defaults. (Custom comments in the file are
+replaced by the template's.)
+
+The external-source vault (`migrated_sources.json`) is written to, in order
+of precedence: `--state-file`, `$MIGRATION_STATE_FILE`, the config's
+`[state].file`, a `migrated_sources.json` in the current directory if one
+already exists (compatibility with older runs), else
+`~/.config/reddit_migration/migrated_sources.json`.
 
 **Where the domains are set:** the `[sources].domains` key above (or the
 `--source-domain` flag). Matching is subdomain-aware, so `pixiv.net` also
@@ -81,10 +95,11 @@ durable place to set things.
 |------|---------|
 | `--login` | run the OAuth flow and store tokens, then exit |
 | `--write-config` | write a commented default config file, then exit |
+| `--update-config` | regenerate the config, keeping values and adding new options, then exit |
 | `--config PATH` | use a specific config file instead of the default location |
 | `--port N` | OAuth redirect port for `--login` (prompts if omitted) |
 | `--limit N` | process at most N saved items (0 = no limit) |
-| `--state-file PATH` | JSON vault for external sources (default `migrated_sources.json`) |
+| `--state-file PATH` | JSON vault for external sources (default: see precedence above) |
 | `--sleep SECS` | delay between API calls (default 1.0) |
 | `--dry-run` | print actions without changing anything |
 | `--skip-comments` | skip saved comments; only migrate submissions |

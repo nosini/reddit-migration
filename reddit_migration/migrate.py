@@ -27,7 +27,7 @@ from urllib.parse import urlparse
 import praw
 from praw.models import Comment, Submission
 
-from .config import load_config
+from .config import load_config, resolve_state_path
 from .secrets_store import load_secrets_into_env
 
 # Blacklist: items from these subreddits are always skipped.
@@ -171,6 +171,7 @@ def load_state(path: Path) -> dict:
 
 
 def save_state(path: Path, state: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     # Write to a temp file first then replace, so a crash mid-write doesn't corrupt state.
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -289,7 +290,10 @@ def run_migrate(args) -> int:
 
     print(f"Source domains: {', '.join(sorted(allowed_domains)) or '(none)'}")
 
-    state_path = Path(args.state_file)
+    # --state-file / $MIGRATION_STATE_FILE win; otherwise the config's
+    # [state].file, a legacy ./migrated_sources.json, or the XDG default.
+    state_path = Path(args.state_file).expanduser() if args.state_file else resolve_state_path(cfg)
+    print(f"State file: {state_path}")
     state = load_state(state_path)
 
     # Materialize the whole saved listing before processing. Unsaving items as
