@@ -33,18 +33,14 @@ from .secrets_store import load_secrets_into_env
 # Blacklist: items from these subreddits are always skipped.
 # Use lowercase names without the "r/" prefix, e.g. "announcements".
 # (Can be extended at runtime with --skip.)
-SKIP_SUBREDDITS = {
-    
-}
+SKIP_SUBREDDITS = set()
 
 # Whitelist: if this set is non-empty, ONLY items from these subreddits are
 # processed; everything else is skipped. Leave it empty to process every
 # subreddit (subject to the blacklist above).
 # Use lowercase names without the "r/" prefix, e.g. "pics".
 # (Can be extended at runtime with --only.)
-ONLY_SUBREDDITS = {
-    
-}
+ONLY_SUBREDDITS = set()
 
 # Source domains are configured, not hardcoded — see config.py (DEFAULT_SOURCE_DOMAINS),
 # the [sources].domains config key, and the --source-domain flag.
@@ -108,13 +104,19 @@ def comment_text(comment: Comment) -> str:
     return f"{title}\n{body}"
 
 
-def submission_candidate_text(submission: Submission) -> str:
+def submission_self_text(submission: Submission) -> str:
+    """Title, selftext, and linked URL of the post itself (no comment fetch)."""
     parts = [
         getattr(submission, "title", "") or "",
         getattr(submission, "selftext", "") or "",
         getattr(submission, "url", "") or "",
     ]
+    return "\n".join(parts)
 
+
+def submission_comment_text(submission: Submission) -> str:
+    """Bodies of all comments on the post. Fetches the comment tree."""
+    parts = []
     try:
         submission.comments.replace_more(limit=0)
         for comment in submission.comments.list():
@@ -147,14 +149,19 @@ def item_title(item) -> str:
 
 def detect_source_url(item, allowed_domains: set) -> Optional[str]:
     if isinstance(item, Submission):
-        text = submission_candidate_text(item)
+        # Check the post itself first; only scan the (expensive) comment tree
+        # as a fallback when the post's own text/url has no matching source.
+        urls = extract_urls(submission_self_text(item))
+        match = first_allowed_source_url(urls, allowed_domains)
+        if match:
+            return match
+        comment_urls = extract_urls(submission_comment_text(item))
+        return first_allowed_source_url(comment_urls, allowed_domains)
     elif isinstance(item, Comment):
-        text = comment_text(item)
+        urls = extract_urls(comment_text(item))
+        return first_allowed_source_url(urls, allowed_domains)
     else:
         return None
-
-    urls = extract_urls(text)
-    return first_allowed_source_url(urls, allowed_domains)
 
 
 def load_state(path: Path) -> dict:
@@ -196,30 +203,34 @@ def migrate_one(
     only_subreddits: set,
     allowed_domains: set,
     dry_run: bool = False,
-) -> str:
+) -> tuple[bool, str]:
+    """Process one saved item.
+
+    Returns (migrated, message): `migrated` is True only when the item was
+    actually migrated (external-source or reddit outcome), False for skips.
+    """
     fullname, permalink, kind = item_meta(item)
 
-    if isinstance(item, Comment):
-        return f"skip {fullname} (comment)"
-
+    # item.subreddit works for both submissions and comments.
     subreddit = item.subreddit.display_name.lower()
 
     if only_subreddits and subreddit not in only_subreddits:
-        return f"skip {fullname} (not in whitelist)"
+        return False, f"skip {fullname} (not in whitelist)"
 
     if subreddit in skip_subreddits:
-        return f"skip {fullname} (subreddit)"
+        return False, f"skip {fullname} (subreddit)"
 
     source_url = detect_source_url(item, allowed_domains)
     if source_url:
-        if already_recorded(state, fullname):
-            return f"skip {fullname} (already recorded source)"
-
-        record_external_source(state, item, source_url)
+        # Record only if not already recorded (avoid duplicates), but always
+        # perform the unsave so a previous crash between record and unsave
+        # self-heals on rerun instead of leaving the item saved forever.
+        if not already_recorded(state, fullname):
+            record_external_source(state, item, source_url)
         if not dry_run:
             item.unsave()
             time.sleep(sleep_secs)
-        return f"external {fullname} -> {source_url}"
+        return True, f"external {fullname} -> {source_url}"
 
     # No external source found — save the Reddit item on account 2 then unsave from account 1.
     if not dry_run:
@@ -231,7 +242,7 @@ def migrate_one(
         time.sleep(sleep_secs)
         item.unsave()
         time.sleep(sleep_secs)
-    return f"reddit {fullname} -> saved on account2 then unsaved on account1"
+    return True, f"reddit {fullname} -> saved on account2 then unsaved on account1"
 
 
 def _split_csv(value: str) -> set:
@@ -244,6 +255,15 @@ def run_migrate(args) -> int:
     # Pull REDDIT_* out of GNOME Keyring (populated by `reddit_migration --login`)
     # unless they're already set in the environment.
     load_secrets_into_env()
+
+    if (
+        "REDDIT_ACCOUNT1_REFRESH_TOKEN" not in os.environ
+        or "REDDIT_ACCOUNT2_REFRESH_TOKEN" not in os.environ
+    ):
+        raise SystemExit(
+            "Missing Reddit refresh tokens. Run `reddit_migration --login` first "
+            "to authorize both accounts."
+        )
 
     refresh1 = os.environ["REDDIT_ACCOUNT1_REFRESH_TOKEN"]
     refresh2 = os.environ["REDDIT_ACCOUNT2_REFRESH_TOKEN"]
@@ -267,13 +287,19 @@ def run_migrate(args) -> int:
     state_path = Path(args.state_file)
     state = load_state(state_path)
 
+    # Materialize the whole saved listing before processing. Unsaving items as
+    # we go mutates the listing that `after`-fullname pagination anchors on, so
+    # a lazy iterator would silently skip items.
+    items = list(reddit1.redditor(str(me1)).saved(limit=None))
+
     processed = 0
-    for item in reddit1.redditor(str(me1)).saved(limit=None):
+    skipped = 0
+    for item in items:
         if args.limit and processed >= args.limit:
             break
 
         try:
-            result = migrate_one(
+            migrated, message = migrate_one(
                 item,
                 reddit2,
                 state,
@@ -283,21 +309,29 @@ def run_migrate(args) -> int:
                 allowed_domains,
                 dry_run=args.dry_run,
             )
-            print(result)
-            processed += 1
+            print(message)
+            if migrated:
+                processed += 1
+            else:
+                skipped += 1
             # Save state after every item so a cancelled run doesn't lose progress.
             if not args.dry_run:
                 save_state(state_path, state)
         except Exception as exc:
             fullname = getattr(item, "fullname", "unknown")
             print(f"error {fullname}: {exc}", file=sys.stderr)
+            # Persist state even on failure: an external source may have been
+            # recorded just before an unsave threw, and we want that recorded
+            # entry saved deliberately so the rerun self-heals the unsave.
+            if not args.dry_run:
+                save_state(state_path, state)
             continue
 
     if args.dry_run:
-        print(f"Dry run complete. {processed} items would be processed.")
+        print(f"Dry run complete. {processed} items would be migrated, {skipped} skipped.")
     else:
         print(
-            f"Done. {processed} items processed. "
+            f"Done. {processed} items migrated, {skipped} skipped. "
             f"{len(state.get('migrated_sources', []))} external-source entries in {state_path}"
         )
 

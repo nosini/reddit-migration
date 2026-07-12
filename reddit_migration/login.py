@@ -76,14 +76,17 @@ class _CallbackHandler(BaseHTTPRequestHandler):
         pass  # keep the console quiet
 
 
-def _wait_for_callback(port: int) -> dict:
+def _bind_callback_server(port: int) -> HTTPServer:
     try:
-        server = HTTPServer((REDIRECT_HOST, port), _CallbackHandler)
+        return HTTPServer((REDIRECT_HOST, port), _CallbackHandler)
     except OSError as exc:
         raise SystemExit(
             f"Could not bind {_redirect_uri(port)} ({exc}). "
             f"Is something already using port {port}?"
         )
+
+
+def _wait_for_callback(server: HTTPServer) -> dict:
     with server:
         server.handle_request()  # blocks until exactly one request is handled
     return _CallbackHandler.result
@@ -99,13 +102,18 @@ def _authorize_account(label: str, client_id: str, user_agent: str, port: int) -
     state = secrets.token_urlsafe(24)
     url = reddit.auth.url(scopes=SCOPES, state=state, duration="permanent")
 
+    # Bind the callback server BEFORE opening the browser, so a port conflict is
+    # reported up front and the redirect can't race the bind after the user
+    # clicks Allow.
+    server = _bind_callback_server(port)
+
     print(f"\n=== Authorize {label} ===")
     print("Opening the authorization page in your browser.")
     print("If it doesn't open, paste this URL manually:\n")
     print(f"  {url}\n")
     webbrowser.open(url)
 
-    result = _wait_for_callback(port)
+    result = _wait_for_callback(server)
 
     if "error" in result:
         raise SystemExit(f"Reddit returned an error: {result['error']}")
@@ -147,12 +155,15 @@ def run_login(port: int | None = None) -> int:
     input("\nStep 1/2 — log into ACCOUNT 1 (source), then press Enter...")
     rt1 = _authorize_account("ACCOUNT 1 (source)", client_id, user_agent, port)
 
-    input("\nStep 2/2 — log into ACCOUNT 2 (destination), then press Enter...")
-    rt2 = _authorize_account("ACCOUNT 2 (destination)", client_id, user_agent, port)
-
+    # Persist account 1's credentials immediately, so a failure while authorizing
+    # account 2 doesn't discard the token we just obtained.
     keyring_store("REDDIT_CLIENT_ID", client_id, "Reddit migrator: client id")
     keyring_store("REDDIT_USER_AGENT", user_agent, "Reddit migrator: user agent")
     keyring_store("REDDIT_ACCOUNT1_REFRESH_TOKEN", rt1, "Reddit migrator: acct1 refresh")
+
+    input("\nStep 2/2 — log into ACCOUNT 2 (destination), then press Enter...")
+    rt2 = _authorize_account("ACCOUNT 2 (destination)", client_id, user_agent, port)
+
     keyring_store("REDDIT_ACCOUNT2_REFRESH_TOKEN", rt2, "Reddit migrator: acct2 refresh")
 
     print("\nStored all four values in GNOME Keyring (Login keyring, visible in Seahorse).")
