@@ -115,6 +115,8 @@ def load_config(explicit: Optional[str] = None) -> Config:
     path = config_path(explicit)
     cfg = Config()
     if not path.exists():
+        if explicit or os.environ.get("REDDIT_MIGRATION_CONFIG"):
+            raise SystemExit(f"Config file not found: {path}")
         return cfg
 
     data = _load_toml(path)
@@ -166,7 +168,7 @@ def update_config(explicit: Optional[str] = None) -> Path:
     was written. Custom comments in the file are not preserved (the template's
     comments replace them). Creates the file if it doesn't exist."""
     path = config_path(explicit)
-    cfg = load_config(explicit)
+    cfg = load_config(explicit) if path.exists() else Config()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(render_config(cfg), encoding="utf-8")
     return path

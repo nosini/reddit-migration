@@ -262,6 +262,9 @@ def _split_csv(value: str) -> set:
 def run_migrate(args) -> int:
     import os
 
+    # Reject invalid configuration before accessing either Reddit account.
+    cfg = load_config(getattr(args, "config", None))
+
     # Pull REDDIT_* out of GNOME Keyring (populated by `reddit_migration --login`)
     # unless they're already set in the environment.
     load_secrets_into_env()
@@ -292,7 +295,6 @@ def run_migrate(args) -> int:
     print(f"Account 2: u/{me2}")
 
     # Effective filters = built-in constants | config file | CLI flags.
-    cfg = load_config(getattr(args, "config", None))
     skip_subreddits = set(SKIP_SUBREDDITS) | cfg.skip | _split_csv(getattr(args, "skip", ""))
     only_subreddits = set(ONLY_SUBREDDITS) | cfg.only | _split_csv(getattr(args, "only", ""))
     allowed_domains = set(cfg.source_domains) | _split_csv(getattr(args, "source_domain", ""))

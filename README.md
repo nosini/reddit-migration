@@ -52,6 +52,8 @@ reddit_migration --write-config
 It's written to `$XDG_CONFIG_HOME/reddit_migration/config.toml` (usually
 `~/.config/reddit_migration/config.toml`). Override the location with `--config PATH`
 or `$REDDIT_MIGRATION_CONFIG`.
+An explicitly selected config file must exist; a missing file stops migration.
+Without an explicit path, a missing default config uses the built-in defaults.
 
 ```toml
 [subreddits]
