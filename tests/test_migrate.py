@@ -82,6 +82,23 @@ class MigrationTests(unittest.TestCase):
         self.item.unsave.assert_not_called()
         self.assertFalse(self.state_path.exists())
 
+    def test_identical_accounts_are_rejected_before_reading_saved_items(self):
+        self.source.user.me.return_value = "Same_User"
+        self.destination.user.me.return_value = "same_user"
+        with self.assertRaisesRegex(SystemExit, "same Reddit account"):
+            migrate.run_migrate(self.args)
+        self.source.redditor.assert_not_called()
+        self.destination.submission.assert_not_called()
+        self.item.unsave.assert_not_called()
+        self.assertFalse(self.state_path.exists())
+
+    def test_distinct_accounts_save_before_unsaving(self):
+        actions = Mock()
+        actions.attach_mock(self.destination.submission.return_value.save, "save")
+        actions.attach_mock(self.item.unsave, "unsave")
+        self.assertEqual(migrate.run_migrate(self.args), 0)
+        self.assertEqual([c[0] for c in actions.mock_calls], ["save", "unsave"])
+
 
 if __name__ == "__main__":
     unittest.main()

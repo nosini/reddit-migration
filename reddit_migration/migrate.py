@@ -283,6 +283,11 @@ def run_migrate(args) -> int:
 
     me1 = reddit1.user.me()
     me2 = reddit2.user.me()
+    if str(me1).casefold() == str(me2).casefold():
+        raise SystemExit(
+            "Source and destination are the same Reddit account. "
+            "Authorize two different accounts before migrating."
+        )
     print(f"Account 1: u/{me1}")
     print(f"Account 2: u/{me2}")
 
