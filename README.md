@@ -31,6 +31,7 @@ Note the **client_id** shown under the app name.
 reddit_migration --login     # browser OAuth for both accounts -> keyring
 reddit_migration             # run the migration
 reddit_migration --dry-run   # preview without saving/unsaving anything
+reddit_migration --version   # show the installed version
 ```
 
 Migration continues after individual item failures and reports migrated, skipped,

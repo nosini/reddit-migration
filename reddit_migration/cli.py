@@ -10,12 +10,15 @@ from __future__ import annotations
 import argparse
 import os
 
+from . import __version__
+
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="reddit_migration",
         description="Migrate saved Reddit items between two accounts; tokens live in GNOME Keyring.",
     )
+    p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     p.add_argument(
         "--login",
         action="store_true",

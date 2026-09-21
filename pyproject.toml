@@ -1,6 +1,6 @@
 [project]
 name = "reddit-migration"
-version = "1.0.0"
+version = "1.0.1"
 description = "Migrate saved Reddit items between two accounts, with OAuth tokens stored in GNOME Keyring."
 readme = "README.md"
 license = "AGPL-3.0-or-later"
