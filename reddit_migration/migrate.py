@@ -205,6 +205,8 @@ def migrate_one(
     allowed_domains: set,
     skip_comments: bool = False,
     dry_run: bool = False,
+    *,
+    state_path: Path,
 ) -> tuple[bool, str]:
     """Process one saved item.
 
@@ -233,6 +235,9 @@ def migrate_one(
         if not already_recorded(state, fullname):
             record_external_source(state, item, source_url)
         if not dry_run:
+            # Commit the vault before removing the only saved Reddit reference.
+            # Retry persistence even for an entry retained in memory after a failure.
+            save_state(state_path, state)
             item.unsave()
             time.sleep(sleep_secs)
         return True, f"external {fullname} -> {source_url}"
@@ -318,23 +323,16 @@ def run_migrate(args) -> int:
                 allowed_domains,
                 skip_comments=skip_comments,
                 dry_run=args.dry_run,
+                state_path=state_path,
             )
             print(message)
             if migrated:
                 processed += 1
             else:
                 skipped += 1
-            # Save state after every item so a cancelled run doesn't lose progress.
-            if not args.dry_run:
-                save_state(state_path, state)
         except Exception as exc:
             fullname = getattr(item, "fullname", "unknown")
             print(f"error {fullname}: {exc}", file=sys.stderr)
-            # Persist state even on failure: an external source may have been
-            # recorded just before an unsave threw, and we want that recorded
-            # entry saved deliberately so the rerun self-heals the unsave.
-            if not args.dry_run:
-                save_state(state_path, state)
             continue
 
     if args.dry_run:
