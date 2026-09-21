@@ -315,6 +315,7 @@ def run_migrate(args) -> int:
 
     processed = 0
     skipped = 0
+    failed = 0
     for item in items:
         if args.limit and processed >= args.limit:
             break
@@ -338,16 +339,20 @@ def run_migrate(args) -> int:
             else:
                 skipped += 1
         except Exception as exc:
+            failed += 1
             fullname = getattr(item, "fullname", "unknown")
             print(f"error {fullname}: {exc}", file=sys.stderr)
             continue
 
     if args.dry_run:
-        print(f"Dry run complete. {processed} items would be migrated, {skipped} skipped.")
+        print(
+            f"Dry run complete. {processed} items would be migrated, "
+            f"{skipped} skipped, {failed} failed."
+        )
     else:
         print(
-            f"Done. {processed} items migrated, {skipped} skipped. "
+            f"Done. {processed} items migrated, {skipped} skipped, {failed} failed. "
             f"{len(state.get('migrated_sources', []))} external-source entries in {state_path}"
         )
 
-    return 0
+    return 1 if failed else 0

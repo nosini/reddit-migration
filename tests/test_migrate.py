@@ -63,7 +63,7 @@ class MigrationTests(unittest.TestCase):
     def test_write_failure_preserves_source_bookmark(self):
         self.detect.return_value = "https://pixiv.net/artworks/1"
         with patch.object(migrate, "save_state", side_effect=OSError("disk full")):
-            migrate.run_migrate(self.args)
+            self.assertEqual(migrate.run_migrate(self.args), 1)
         self.item.unsave.assert_not_called()
 
     def test_existing_vault_entry_is_not_duplicated(self):
@@ -98,6 +98,39 @@ class MigrationTests(unittest.TestCase):
         actions.attach_mock(self.item.unsave, "unsave")
         self.assertEqual(migrate.run_migrate(self.args), 0)
         self.assertEqual([c[0] for c in actions.mock_calls], ["save", "unsave"])
+
+    def test_all_failures_return_nonzero_and_are_counted(self):
+        self.destination.submission.return_value.save.side_effect = RuntimeError("API failure")
+        self.assertEqual(migrate.run_migrate(self.args), 1)
+        self.item.unsave.assert_not_called()
+        self.assertIn("0 items migrated, 0 skipped, 1 failed", self.output.getvalue())
+
+    def test_partial_failure_continues_and_returns_nonzero(self):
+        failed_item = Mock(spec=Submission)
+        failed_item.fullname = "t3_failed"
+        failed_item.permalink = "/r/example/failed"
+        failed_item.id = "failed"
+        failed_item.subreddit = Mock(display_name="example")
+        self.source.redditor.return_value.saved.return_value = [failed_item, self.item]
+        self.destination.submission.return_value.save.side_effect = [RuntimeError("API failure"), None]
+        self.assertEqual(migrate.run_migrate(self.args), 1)
+        failed_item.unsave.assert_not_called()
+        self.item.unsave.assert_called_once()
+        self.assertIn("1 items migrated, 0 skipped, 1 failed", self.output.getvalue())
+
+    def test_only_skips_return_success(self):
+        self.args.skip = "example"
+        self.assertEqual(migrate.run_migrate(self.args), 0)
+        self.item.unsave.assert_not_called()
+        self.assertIn("0 items migrated, 1 skipped, 0 failed", self.output.getvalue())
+
+    def test_dry_run_failures_return_nonzero(self):
+        self.args.dry_run = True
+        self.detect.side_effect = RuntimeError("read failure")
+        self.assertEqual(migrate.run_migrate(self.args), 1)
+        self.item.unsave.assert_not_called()
+        self.assertFalse(self.state_path.exists())
+        self.assertIn("0 items would be migrated, 0 skipped, 1 failed", self.output.getvalue())
 
 
 if __name__ == "__main__":

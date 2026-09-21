@@ -33,6 +33,10 @@ reddit_migration             # run the migration
 reddit_migration --dry-run   # preview without saving/unsaving anything
 ```
 
+Migration continues after individual item failures and reports migrated, skipped,
+and failed counts. The command exits with status 1 if any item fails (including
+during a dry run), or 0 when all items succeed or are skipped.
+
 `--login` prompts for the client_id and user agent (only the first time — after
 that they come from the keyring), and for the OAuth **redirect port** (default
 8080; pass `--port` to skip the prompt). The port only has to match your Reddit
