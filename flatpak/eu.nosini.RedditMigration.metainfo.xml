@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="console-application">
-  <id>page.codeberg.nosini.RedditMigration</id>
+  <id>eu.nosini.RedditMigration</id>
   <name>Reddit Migration</name>
   <summary>Move saved Reddit items from one account to another</summary>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>AGPL-3.0-or-later</project_license>
-  <developer id="page.codeberg.nosini">
+  <developer id="eu.nosini">
     <name>Nosini</name>
   </developer>
   <description>

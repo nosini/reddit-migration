@@ -1,4 +1,4 @@
-id: page.codeberg.nosini.RedditMigration
+id: eu.nosini.RedditMigration
 runtime: org.freedesktop.Platform
 runtime-version: '26.08'
 sdk: org.freedesktop.Sdk

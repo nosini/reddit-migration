@@ -22,7 +22,7 @@ Flatpak repository on GitHub Pages:
 
 ```bash
 flatpak install --user https://nosini.github.io/reddit-migration/reddit-migration.flatpakref
-flatpak run page.codeberg.nosini.RedditMigration --login
+flatpak run eu.nosini.RedditMigration --login
 ```
 
 This adds a `reddit-migration` remote (and Flathub, for the runtime), so
@@ -34,8 +34,8 @@ To build it yourself instead: the manifest in `flatpak/` builds on the
 ```bash
 flatpak install --user flathub org.freedesktop.Platform//26.08 org.freedesktop.Sdk//26.08
 flatpak-builder --user --install --force-clean build-dir \
-    flatpak/page.codeberg.nosini.RedditMigration.yml
-flatpak run page.codeberg.nosini.RedditMigration --login
+    flatpak/eu.nosini.RedditMigration.yml
+flatpak run eu.nosini.RedditMigration --login
 ```
 
 To build without cloning first, let flatpak-builder fetch the repository itself.
@@ -45,9 +45,9 @@ This builds in a temporary directory and deletes it afterwards:
 d=$(mktemp -d)
 (cd "$d" && flatpak-builder --user --install --force-clean \
     --from-git=https://codeberg.org/nosini/reddit-migration.git --from-git-branch=main \
-    build-dir flatpak/page.codeberg.nosini.RedditMigration.yml) &&
+    build-dir flatpak/eu.nosini.RedditMigration.yml) &&
   flatpak remote-modify --user --disable \
-    "$(flatpak info --user --show-origin page.codeberg.nosini.RedditMigration)"
+    "$(flatpak info --user --show-origin eu.nosini.RedditMigration)"
 rm -rf "$d"
 ```
 
@@ -56,9 +56,9 @@ than `master` and tries to check out `master`. `--install` registers the build
 directory as the app's update source. Once that directory is deleted,
 `flatpak update` warns about it, so the command disables that source.
 
-Flatpak puts a launcher named `page.codeberg.nosini.RedditMigration` in its
+Flatpak puts a launcher named `eu.nosini.RedditMigration` in its
 `exports/bin` directory. Alias it if you want the short name:
-`alias reddit_migration='flatpak run page.codeberg.nosini.RedditMigration'`.
+`alias reddit_migration='flatpak run eu.nosini.RedditMigration'`.
 
 It also adds a **Reddit Migration** entry to the application menu. The entry runs the
 migration in a terminal, and its right-click actions start a dry run or
@@ -66,7 +66,7 @@ migration in a terminal, and its right-click actions start a dry run or
 
 The sandbox can reach the network, GNOME Keyring and `~/.config/reddit_migration`,
 so it shares tokens, config and state with a pipx install. It can't see the rest
-of your home directory: grant access with `flatpak override --user --filesystem=PATH page.codeberg.nosini.RedditMigration`
+of your home directory: grant access with `flatpak override --user --filesystem=PATH eu.nosini.RedditMigration`
 before passing `--config`/`--state-file` paths outside that folder.
 
 The Python dependencies are pinned in `flatpak/python3-deps.json`. After
