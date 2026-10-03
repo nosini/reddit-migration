@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="console-application">
+  <id>page.codeberg.nosini.RedditMigration</id>
+  <name>Reddit Migration</name>
+  <summary>Move saved Reddit items from one account to another</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>AGPL-3.0-or-later</project_license>
+  <developer id="page.codeberg.nosini">
+    <name>Nosini</name>
+  </developer>
+  <description>
+    <p>
+      Migrates saved posts and comments from one Reddit account to another,
+      filtered by subreddit. Items whose source is on a configured external
+      site are recorded in a local JSON file instead. OAuth refresh tokens are
+      stored in GNOME Keyring.
+    </p>
+  </description>
+  <url type="homepage">https://codeberg.org/nosini/reddit-migration</url>
+  <url type="bugtracker">https://codeberg.org/nosini/reddit-migration/issues</url>
+  <provides>
+    <binary>reddit_migration</binary>
+  </provides>
+  <categories>
+    <category>Network</category>
+  </categories>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="1.0.1" date="2026-09-21"/>
+  </releases>
+</component>

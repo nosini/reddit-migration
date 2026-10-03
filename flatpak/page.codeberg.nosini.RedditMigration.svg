@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ff7a45"/>
+      <stop offset="1" stop-color="#e2461b"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="112" height="112" rx="24" fill="url(#bg)"/>
+  <!-- source bookmark, outlined: the item leaving account 1 -->
+  <path d="M22 34 h26 v52 l-13 -10 l-13 10 z" fill="none" stroke="#fff" stroke-width="5"
+        stroke-linejoin="round" opacity="0.75"/>
+  <!-- arrow -->
+  <path d="M55 60 h16" stroke="#fff" stroke-width="6" stroke-linecap="round"/>
+  <path d="M66 50 l10 10 l-10 10" fill="none" stroke="#fff" stroke-width="6"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- destination bookmark, filled: the item saved on account 2 -->
+  <path d="M82 32 h26 v56 l-13 -11 l-13 11 z" fill="#fff" stroke="#fff" stroke-width="3"
+        stroke-linejoin="round"/>
+</svg>

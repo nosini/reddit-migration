@@ -20,3 +20,9 @@ config.toml
 .idea/
 *.swp
 .DS_Store
+
+# Flatpak build output
+.flatpak-builder/
+build-dir/
+repo/
+*.flatpak

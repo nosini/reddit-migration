@@ -15,6 +15,35 @@ pipx install .
 SecretStorage pulls in `jeepney` + `cryptography`, both pure-wheel installs, so
 it works inside the isolated pipx venv without system dbus-python.
 
+## Install (Flatpak)
+
+The manifest in `flatpak/` builds on the `org.freedesktop.Platform` 26.08
+runtime:
+
+```bash
+flatpak install --user flathub org.freedesktop.Platform//26.08 org.freedesktop.Sdk//26.08
+flatpak-builder --user --install --force-clean build-dir \
+    flatpak/page.codeberg.nosini.RedditMigration.yml
+flatpak run page.codeberg.nosini.RedditMigration --login
+```
+
+Flatpak puts a launcher named `page.codeberg.nosini.RedditMigration` in its
+`exports/bin` directory. Alias it if you want the short name:
+`alias reddit_migration='flatpak run page.codeberg.nosini.RedditMigration'`.
+
+It also adds a **Reddit Migration** entry to the application menu. The entry runs the
+migration in a terminal, and its right-click actions start a dry run or
+`--login`. The terminal stays open after the run until you press Enter.
+
+The sandbox can reach the network, GNOME Keyring and `~/.config/reddit_migration`,
+so it shares tokens, config and state with a pipx install. It can't see the rest
+of your home directory: grant access with `flatpak override --user --filesystem=PATH page.codeberg.nosini.RedditMigration`
+before passing `--config`/`--state-file` paths outside that folder.
+
+The Python dependencies are pinned in `flatpak/python3-deps.json`. After
+changing dependencies in `pyproject.toml`, regenerate it with
+`python3 flatpak/generate-python-deps.py` (needs Python 3.11+ and network access).
+
 ## One-time Reddit setup
 
 Create an app at <https://www.reddit.com/prefs/apps>:
