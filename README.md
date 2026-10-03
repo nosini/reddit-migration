@@ -27,6 +27,24 @@ flatpak-builder --user --install --force-clean build-dir \
 flatpak run page.codeberg.nosini.RedditMigration --login
 ```
 
+To build without cloning first, let flatpak-builder fetch the repository itself.
+This builds in a temporary directory and deletes it afterwards:
+
+```bash
+d=$(mktemp -d)
+(cd "$d" && flatpak-builder --user --install --force-clean \
+    --from-git=https://codeberg.org/nosini/reddit-migration.git --from-git-branch=main \
+    build-dir flatpak/page.codeberg.nosini.RedditMigration.yml) &&
+  flatpak remote-modify --user --disable \
+    "$(flatpak info --user --show-origin page.codeberg.nosini.RedditMigration)"
+rm -rf "$d"
+```
+
+Keep `--from-git-branch`: flatpak-builder fails to detect a default branch other
+than `master` and tries to check out `master`. `--install` registers the build
+directory as the app's update source. Once that directory is deleted,
+`flatpak update` warns about it, so the command disables that source.
+
 Flatpak puts a launcher named `page.codeberg.nosini.RedditMigration` in its
 `exports/bin` directory. Alias it if you want the short name:
 `alias reddit_migration='flatpak run page.codeberg.nosini.RedditMigration'`.

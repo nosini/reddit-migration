@@ -4,6 +4,11 @@ runtime-version: '26.08'
 sdk: org.freedesktop.Sdk
 command: reddit_migration-flatpak
 
+# The only native code is prebuilt wheels, so there is no useful debug info.
+# Without it no .Debug extension is exported, and --install doesn't add one.
+build-options:
+  no-debuginfo: true
+
 finish-args:
   # Reddit API, and the OAuth redirect listener on localhost during --login.
   - --share=network
