@@ -1,0 +1,97 @@
+# Builds the Flatpak on every push to main and publishes it as a signed
+# Flatpak repository on GitHub Pages, so `flatpak update` picks up new commits.
+name: Flatpak
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Queue deployments instead of cancelling one halfway through.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  APP_ID: page.codeberg.nosini.RedditMigration
+  REPO_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-26.08
+      # flatpak-builder's bubblewrap sandbox needs namespaces Docker withholds otherwise.
+      options: --privileged
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Import signing key
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.FLATPAK_GPG_PRIVATE_KEY }}
+        run: |
+          export GNUPGHOME="$RUNNER_TEMP/gnupg"
+          mkdir -m 700 "$GNUPGHOME"
+          printf '%s\n' "$GPG_PRIVATE_KEY" | gpg --batch --import
+          key=$(gpg --batch --list-secret-keys --with-colons | awk -F: '$1 == "fpr" && !k { k = $10 } END { print k }')
+          test -n "$key"
+          echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
+          echo "GPG_KEY=$key" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: >-
+          flatpak-builder --disable-rofiles-fuse --force-clean
+          --repo=repo --gpg-sign="$GPG_KEY" --gpg-homedir="$GNUPGHOME"
+          build-dir "flatpak/$APP_ID.yml"
+
+      # Each run publishes a fresh repository holding only this build. Clients
+      # only need the newest commit, and unchanged files aren't downloaded again.
+      - name: Prepare repository
+        run: |
+          flatpak build-update-repo --gpg-sign="$GPG_KEY" --gpg-homedir="$GNUPGHOME" \
+            --title="Reddit Migration" --default-branch=master repo
+          rm -rf repo/tmp
+          gpg_key=$(gpg --export --export-options export-minimal "$GPG_KEY" | base64 -w0)
+          cat > repo/reddit-migration.flatpakrepo <<EOF
+          [Flatpak Repo]
+          Title=Reddit Migration
+          Url=$REPO_URL
+          Homepage=https://codeberg.org/nosini/reddit-migration
+          GPGKey=$gpg_key
+          EOF
+          cat > repo/reddit-migration.flatpakref <<EOF
+          [Flatpak Ref]
+          Name=$APP_ID
+          Branch=master
+          Title=Reddit Migration
+          Url=$REPO_URL
+          RuntimeRepo=https://dl.flathub.org/repo/flathub.flatpakrepo
+          IsRuntime=false
+          SuggestRemoteName=reddit-migration
+          GPGKey=$gpg_key
+          EOF
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: repo
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

@@ -17,8 +17,19 @@ it works inside the isolated pipx venv without system dbus-python.
 
 ## Install (Flatpak)
 
-The manifest in `flatpak/` builds on the `org.freedesktop.Platform` 26.08
-runtime:
+Every push to `main` is built on GitHub Actions and published as a signed
+Flatpak repository on GitHub Pages:
+
+```bash
+flatpak install --user https://nosini.github.io/reddit-migration/reddit-migration.flatpakref
+flatpak run page.codeberg.nosini.RedditMigration --login
+```
+
+This adds a `reddit-migration` remote (and Flathub, for the runtime), so
+`flatpak update` installs new builds.
+
+To build it yourself instead: the manifest in `flatpak/` builds on the
+`org.freedesktop.Platform` 26.08 runtime:
 
 ```bash
 flatpak install --user flathub org.freedesktop.Platform//26.08 org.freedesktop.Sdk//26.08
