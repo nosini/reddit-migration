@@ -16,8 +16,8 @@
       stored in GNOME Keyring.
     </p>
   </description>
-  <url type="homepage">https://codeberg.org/nosini/reddit-migration</url>
-  <url type="bugtracker">https://codeberg.org/nosini/reddit-migration/issues</url>
+  <url type="homepage">https://github.com/nosini/reddit-migration</url>
+  <url type="bugtracker">https://github.com/nosini/reddit-migration/issues</url>
   <provides>
     <binary>reddit_migration</binary>
   </provides>

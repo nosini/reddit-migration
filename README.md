@@ -44,7 +44,7 @@ This builds in a temporary directory and deletes it afterwards:
 ```bash
 d=$(mktemp -d)
 (cd "$d" && flatpak-builder --user --install --force-clean \
-    --from-git=https://codeberg.org/nosini/reddit-migration.git --from-git-branch=main \
+    --from-git=https://github.com/nosini/reddit-migration.git --from-git-branch=main \
     build-dir flatpak/eu.nosini.RedditMigration.yml) &&
   flatpak remote-modify --user --disable \
     "$(flatpak info --user --show-origin eu.nosini.RedditMigration)"

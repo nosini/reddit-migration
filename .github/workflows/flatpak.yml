@@ -64,7 +64,7 @@ jobs:
           [Flatpak Repo]
           Title=Reddit Migration
           Url=$REPO_URL
-          Homepage=https://codeberg.org/nosini/reddit-migration
+          Homepage=https://github.com/nosini/reddit-migration
           GPGKey=$gpg_key
           EOF
           cat > repo/reddit-migration.flatpakref <<EOF
