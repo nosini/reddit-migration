@@ -25,4 +25,5 @@ config.toml
 .flatpak-builder/
 build-dir/
 repo/
+signed-repo/
 *.flatpak

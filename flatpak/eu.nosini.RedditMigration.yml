@@ -1,56 +1,32 @@
 id: eu.nosini.RedditMigration
+branch: stable
 runtime: org.freedesktop.Platform
 runtime-version: '26.08'
 sdk: org.freedesktop.Sdk
-command: reddit_migration-flatpak
-
-# The only native code is prebuilt wheels, so there is no useful debug info.
-# Without it no .Debug extension is exported, and --install doesn't add one.
+command: reddit_migration
 build-options:
+  # The only native code comes from prebuilt wheels; a .Debug extension would
+  # contain nothing useful.
   no-debuginfo: true
-
 finish-args:
   # Reddit API, and the OAuth redirect listener on localhost during --login.
   - --share=network
   # OAuth tokens live in GNOME Keyring (Secret Service), shared with a pipx install.
   - --talk-name=org.freedesktop.secrets
-  # Config and state in ~/.config/reddit_migration, shared with a pipx install.
+  # Same config and state folder as a pipx install. Flatpak also mounts it
+  # under the app's own XDG_CONFIG_HOME, where reddit_migration looks for it.
   - --filesystem=xdg-config/reddit_migration:create
   # Python's webbrowser only tries xdg-open when a display socket is present;
   # point it there directly so --login opens the host browser via the portal.
   - --env=BROWSER=xdg-open
-
 modules:
-  - python3-deps.json
+  - python-packages.json
 
   - name: reddit-migration
     buildsystem: simple
     build-commands:
-      - pip3 install --verbose --no-index --no-deps --no-build-isolation --prefix=${FLATPAK_DEST} .
-      - install -Dm644 flatpak/${FLATPAK_ID}.metainfo.xml ${FLATPAK_DEST}/share/metainfo/${FLATPAK_ID}.metainfo.xml
-      - install -Dm755 reddit_migration-flatpak ${FLATPAK_DEST}/bin/reddit_migration-flatpak
-      - install -Dm755 reddit_migration-terminal ${FLATPAK_DEST}/bin/reddit_migration-terminal
-      - install -Dm644 flatpak/${FLATPAK_ID}.desktop ${FLATPAK_DEST}/share/applications/${FLATPAK_ID}.desktop
-      - install -Dm644 flatpak/${FLATPAK_ID}.svg ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/${FLATPAK_ID}.svg
+      - pip3 install --no-index --no-deps --no-build-isolation --prefix="${FLATPAK_DEST}" .
     sources:
-      # Flatpak always sets XDG_CONFIG_HOME to the app's private directory, so
-      # point it back at the host's (HOST_XDG_CONFIG_HOME is only set when the
-      # host overrides the default).
-      - type: script
-        dest-filename: reddit_migration-flatpak
-        commands:
-          - export XDG_CONFIG_HOME="${HOST_XDG_CONFIG_HOME:-$HOME/.config}"
-          - exec reddit_migration "$@"
-      # The .desktop entry runs in a terminal that closes when the command exits;
-      # keep it open so the summary can be read.
-      - type: script
-        dest-filename: reddit_migration-terminal
-        commands:
-          - reddit_migration-flatpak "$@"
-          - status=$?
-          - printf '\nFinished with exit status %d. Press Enter to close.' "$status"
-          - read -r _
-          - exit "$status"
       - type: dir
         path: ..
         skip:
@@ -62,3 +38,21 @@ modules:
           - build-dir
           - dist
           - repo
+          - signed-repo
+
+  - name: metadata
+    buildsystem: simple
+    build-commands:
+      - install -Dm644 eu.nosini.RedditMigration.desktop -t "${FLATPAK_DEST}/share/applications"
+      - install -Dm644 eu.nosini.RedditMigration.metainfo.xml -t "${FLATPAK_DEST}/share/metainfo"
+      - install -Dm644 eu.nosini.RedditMigration.svg -t "${FLATPAK_DEST}/share/icons/hicolor/scalable/apps"
+      - install -Dm755 reddit_migration-terminal -t "${FLATPAK_DEST}/bin"
+    sources:
+      - type: file
+        path: eu.nosini.RedditMigration.desktop
+      - type: file
+        path: eu.nosini.RedditMigration.metainfo.xml
+      - type: file
+        path: eu.nosini.RedditMigration.svg
+      - type: file
+        path: reddit_migration-terminal

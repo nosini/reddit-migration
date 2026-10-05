@@ -4,74 +4,69 @@ Migrate saved Reddit items from one account to another. OAuth refresh tokens
 (and the client id / user agent) are stored in **GNOME Keyring** — visible in
 Seahorse — so nothing sensitive lives in shell history or dotfiles.
 
-## Install (pipx)
+## Install
 
-```bash
-pipx install .
+### Flatpak
+
+Install [Flatpak](https://flatpak.org/setup/) if you don't already have it,
+then:
+
+```sh
+flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+flatpak install --user https://nosini.github.io/reddit-migration/reddit-migration.flatpakref
 ```
 
-(or point pipx at the folder: `pipx install /path/to/reddit_migration_project`)
+This adds a remote named `reddit-migration`. Updates come through it like any
+other Flatpak, from GNOME Software or with:
+
+```sh
+flatpak update --user eu.nosini.RedditMigration
+```
+
+The package is built for x86_64. Run it with
+`flatpak run eu.nosini.RedditMigration`, followed by the options described
+under [Usage](#usage). For the short command name, add an alias to your shell:
+
+```sh
+alias reddit_migration='flatpak run eu.nosini.RedditMigration'
+```
+
+It also adds a **Reddit Migration** entry to the application menu. The entry
+runs the migration in a terminal, and its right-click actions start a dry run
+or `--login`. The terminal stays open after the run until you press Enter.
+
+The app can reach the network, GNOME Keyring and `~/.config/reddit_migration`,
+so it shares tokens, config and state with a pipx install. Inside the sandbox
+that folder also appears as
+`~/.var/app/eu.nosini.RedditMigration/config/reddit_migration`, which is the
+path `--write-config` reports; both names refer to the same files. The app
+can't see the rest of your home directory. Grant access with
+`flatpak override --user --filesystem=PATH eu.nosini.RedditMigration` before
+passing `--config`/`--state-file` paths outside that folder.
+
+#### Switching from an earlier install
+
+Earlier packages were published on the `master` branch, and builds made with
+`flatpak-builder --install` don't receive updates. Replace either with the
+published `stable` branch:
+
+```sh
+flatpak remote-add --user --if-not-exists reddit-migration https://nosini.github.io/reddit-migration/reddit-migration.flatpakrepo
+flatpak uninstall --user eu.nosini.RedditMigration
+flatpak install --user reddit-migration eu.nosini.RedditMigration//stable
+```
+
+Tokens, config and state are kept, since they live in GNOME Keyring and
+`~/.config/reddit_migration`.
+
+### pipx
+
+```bash
+pipx install git+https://github.com/nosini/reddit-migration.git
+```
 
 SecretStorage pulls in `jeepney` + `cryptography`, both pure-wheel installs, so
 it works inside the isolated pipx venv without system dbus-python.
-
-## Install (Flatpak)
-
-Every push to `main` is built on GitHub Actions and published as a signed
-Flatpak repository on GitHub Pages:
-
-```bash
-flatpak install --user https://nosini.github.io/reddit-migration/reddit-migration.flatpakref
-flatpak run eu.nosini.RedditMigration --login
-```
-
-This adds a `reddit-migration` remote (and Flathub, for the runtime), so
-`flatpak update` installs new builds.
-
-To build it yourself instead: the manifest in `flatpak/` builds on the
-`org.freedesktop.Platform` 26.08 runtime:
-
-```bash
-flatpak install --user flathub org.freedesktop.Platform//26.08 org.freedesktop.Sdk//26.08
-flatpak-builder --user --install --force-clean build-dir \
-    flatpak/eu.nosini.RedditMigration.yml
-flatpak run eu.nosini.RedditMigration --login
-```
-
-To build without cloning first, let flatpak-builder fetch the repository itself.
-This builds in a temporary directory and deletes it afterwards:
-
-```bash
-d=$(mktemp -d)
-(cd "$d" && flatpak-builder --user --install --force-clean \
-    --from-git=https://github.com/nosini/reddit-migration.git --from-git-branch=main \
-    build-dir flatpak/eu.nosini.RedditMigration.yml) &&
-  flatpak remote-modify --user --disable \
-    "$(flatpak info --user --show-origin eu.nosini.RedditMigration)"
-rm -rf "$d"
-```
-
-Keep `--from-git-branch`: flatpak-builder fails to detect a default branch other
-than `master` and tries to check out `master`. `--install` registers the build
-directory as the app's update source. Once that directory is deleted,
-`flatpak update` warns about it, so the command disables that source.
-
-Flatpak puts a launcher named `eu.nosini.RedditMigration` in its
-`exports/bin` directory. Alias it if you want the short name:
-`alias reddit_migration='flatpak run eu.nosini.RedditMigration'`.
-
-It also adds a **Reddit Migration** entry to the application menu. The entry runs the
-migration in a terminal, and its right-click actions start a dry run or
-`--login`. The terminal stays open after the run until you press Enter.
-
-The sandbox can reach the network, GNOME Keyring and `~/.config/reddit_migration`,
-so it shares tokens, config and state with a pipx install. It can't see the rest
-of your home directory: grant access with `flatpak override --user --filesystem=PATH eu.nosini.RedditMigration`
-before passing `--config`/`--state-file` paths outside that folder.
-
-The Python dependencies are pinned in `flatpak/python3-deps.json`. After
-changing dependencies in `pyproject.toml`, regenerate it with
-`python3 flatpak/generate-python-deps.py` (needs Python 3.11+ and network access).
 
 ## One-time Reddit setup
 
@@ -179,3 +174,6 @@ Environment variables still override the keyring if set:
 ## License
 
 [AGPL-3.0-or-later](LICENSE).
+
+Building the Flatpak yourself and publishing it are described in
+[docs/development.md](docs/development.md).

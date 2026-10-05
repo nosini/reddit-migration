@@ -1,104 +1,91 @@
 #!/usr/bin/env python3
-"""Regenerate python3-deps.json, the Flatpak module with the app's PyPI dependencies.
+"""Pin the Python wheels that reddit-migration needs on top of the runtime.
 
-Resolves the [project].dependencies from pyproject.toml for the runtime's
-Python on each architecture and pins every wheel by URL and sha256. Wheels
-that differ per architecture (cffi, cryptography) get `only-arches`.
+The Freedesktop 26.08 runtime ships Python 3.14, pip and setuptools. The
+dependencies declared in pyproject.toml come from PyPI as prebuilt wheels,
+resolved once per architecture. Wheels that differ between architectures
+(cffi, cryptography) are marked with only-arches.
 
-Needs Python 3.11+ and pip 23.1+ (for `pip install --dry-run --report`).
-Run it after changing dependencies or the runtime version:
-
-    python3 flatpak/generate-python-deps.py
+Run with Python 3.14 so dependency environment markers match the runtime.
 """
 
-from __future__ import annotations
-
 import json
+from pathlib import Path
+import shlex
 import subprocess
 import sys
 import tempfile
 import tomllib
-from pathlib import Path
+from urllib.parse import unquote, urlsplit
 
 HERE = Path(__file__).resolve().parent
 PYPROJECT = HERE.parent / "pyproject.toml"
-OUTPUT = HERE / "python3-deps.json"
-
-# Python shipped by org.freedesktop.Platform 26.08.
-PYTHON_VERSION = "3.14"
-
-# Flatpak arch -> manylinux platform tags, newest first. The runtime's glibc is
-# far newer than any of these, so every listed tag is usable.
 ARCHES = {
     "x86_64": ["manylinux_2_34_x86_64", "manylinux_2_28_x86_64", "manylinux2014_x86_64"],
     "aarch64": ["manylinux_2_34_aarch64", "manylinux_2_28_aarch64", "manylinux2014_aarch64"],
 }
 
 
-def resolve(requirements: list[str], platforms: list[str]) -> list[dict]:
+def resolve(requirements, platforms):
     with tempfile.TemporaryDirectory() as tmp:
         report = Path(tmp) / "report.json"
-        cmd = [
-            sys.executable, "-m", "pip", "install",
-            "--quiet", "--dry-run", "--ignore-installed",
-            "--report", str(report),
+        command = [
+            sys.executable, "-m", "pip", "install", "--dry-run", "--quiet",
+            "--ignore-installed", "--only-binary=:all:",
+            "--implementation=cp", "--python-version=3.14",
+            *(f"--platform={platform}" for platform in platforms),
+            "--index-url=https://pypi.org/simple",
             "--target", str(Path(tmp) / "target"),
-            "--only-binary=:all:",
-            "--implementation", "cp",
-            "--python-version", PYTHON_VERSION,
+            "--report", str(report), *requirements,
         ]
-        for platform in platforms:
-            cmd += ["--platform", platform]
-        subprocess.run(cmd + requirements, check=True)
-        install = json.loads(report.read_text())["install"]
-
-    wheels = []
-    for item in install:
-        info = item["download_info"]
-        wheels.append({
-            "name": item["metadata"]["name"],
-            "url": info["url"],
-            "sha256": info["archive_info"]["hashes"]["sha256"],
-        })
-    return wheels
+        subprocess.run(command, check=True)
+        return json.loads(report.read_text())["install"]
 
 
-def main() -> int:
-    project = tomllib.loads(PYPROJECT.read_text())["project"]
-    requirements = project["dependencies"]
-
-    # url -> source entry, keeping the arches each wheel is needed on.
-    sources: dict[str, dict] = {}
-    names: set[str] = set()
+def write_module(name, requirements):
+    # url -> (source entry, arches it is needed on)
+    wheels = {}
+    pins = {}
     for arch, platforms in ARCHES.items():
-        for wheel in resolve(requirements, platforms):
-            names.add(wheel["name"])
-            entry = sources.setdefault(wheel["url"], {
+        for package in resolve(requirements, platforms):
+            download = package["download_info"]
+            url = download["url"]
+            meta = package["metadata"]
+            pins[meta["name"].lower()] = f"{meta['name']}=={meta['version']}"
+            source, arches = wheels.setdefault(url, ({
                 "type": "file",
-                "url": wheel["url"],
-                "sha256": wheel["sha256"],
-                "arches": [],
-            })
-            entry["arches"].append(arch)
+                "url": url,
+                "dest-filename": unquote(urlsplit(url).path.rsplit("/", 1)[1]),
+                "sha256": download["archive_info"]["hashes"]["sha256"],
+            }, []))
+            arches.append(arch)
 
-    for entry in sources.values():
-        arches = entry.pop("arches")
+    sources = []
+    for source, arches in sorted(wheels.values(), key=lambda item: item[0]["dest-filename"].lower()):
         if len(arches) != len(ARCHES):
-            entry["only-arches"] = arches
+            source["only-arches"] = arches
+        sources.append(source)
 
     module = {
-        "name": "python3-deps",
+        "name": name,
         "buildsystem": "simple",
         "build-commands": [
-            "pip3 install --verbose --no-index --find-links=\"file://${PWD}\""
-            " --prefix=${FLATPAK_DEST} --no-build-isolation " + " ".join(sorted(names)),
+            'pip3 install --no-index --find-links="${PWD}" --only-binary=:all:'
+            ' --no-deps --ignore-installed --prefix="${FLATPAK_DEST}" '
+            + " ".join(shlex.quote(pins[key]) for key in sorted(pins)),
         ],
-        "sources": sorted(sources.values(), key=lambda s: s["url"].rsplit("/", 1)[1].lower()),
+        "sources": sources,
     }
-    OUTPUT.write_text(json.dumps(module, indent=4) + "\n")
-    print(f"Wrote {OUTPUT.relative_to(Path.cwd()) if OUTPUT.is_relative_to(Path.cwd()) else OUTPUT}")
-    return 0
+    (HERE / f"{name}.json").write_text(json.dumps(module, indent=2) + "\n")
+
+
+def main():
+    # pip evaluates dependency environment markers against the running Python.
+    if sys.version_info[:2] != (3, 14):
+        raise SystemExit("Run this script with Python 3.14 (the runtime's version).")
+    project = tomllib.loads(PYPROJECT.read_text())["project"]
+    write_module("python-packages", project["dependencies"])
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    main()

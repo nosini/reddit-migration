@@ -1,30 +1,24 @@
-# Builds the Flatpak on every push to main and publishes it as a signed
-# Flatpak repository on GitHub Pages, so `flatpak update` picks up new commits.
 name: Flatpak
 
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# Queue deployments instead of cancelling one halfway through.
 concurrency:
-  group: pages
+  group: flatpak-${{ github.ref }}
   cancel-in-progress: false
-
-env:
-  APP_ID: eu.nosini.RedditMigration
-  REPO_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     container:
       image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-26.08
-      # flatpak-builder's bubblewrap sandbox needs namespaces Docker withholds otherwise.
+      # Bubblewrap needs namespaces unavailable in an ordinary Docker container.
       options: --privileged
     defaults:
       run:
@@ -34,64 +28,108 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Install SDK and runtime
+        run: |
+          flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak install --noninteractive flathub org.freedesktop.Sdk//26.08 org.freedesktop.Platform//26.08
+
+      - name: Build
+        run: |
+          flatpak-builder --disable-rofiles-fuse --force-clean --arch=x86_64 \
+            --repo=repo build-dir flatpak/eu.nosini.RedditMigration.yml
+
+      - name: Check software-center metadata
+        run: |
+          flatpak build-update-repo repo
+          flatpak --user remote-add --no-gpg-verify local-test "$PWD/repo"
+          flatpak --user update --appstream local-test
+          python3 scripts/check-appstream.py \
+            "${XDG_DATA_HOME:-$HOME/.local/share}/flatpak/appstream/local-test/x86_64/active"
+
+      - name: Check the installed app against its runtime
+        run: bash scripts/test-installed.sh
+
+      - name: Create installable bundle
+        run: |
+          flatpak build-bundle --arch=x86_64 \
+            --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo \
+            repo reddit-migration-x86_64.flatpak eu.nosini.RedditMigration stable
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: reddit-migration-x86_64
+          path: reddit-migration-x86_64.flatpak
+          if-no-files-found: error
+
       - name: Import signing key
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.PUBLISH_FLATPAK == 'true'
         env:
           GPG_PRIVATE_KEY: ${{ secrets.FLATPAK_GPG_PRIVATE_KEY }}
         run: |
-          export GNUPGHOME="$RUNNER_TEMP/gnupg"
+          if [[ -z "$GPG_PRIVATE_KEY" ]]; then
+            echo 'Set FLATPAK_GPG_PRIVATE_KEY before enabling PUBLISH_FLATPAK.' >&2
+            exit 1
+          fi
+          export GNUPGHOME="$RUNNER_TEMP/reddit-migration-gnupg"
           mkdir -m 700 "$GNUPGHOME"
           printf '%s\n' "$GPG_PRIVATE_KEY" | gpg --batch --import
-          key=$(gpg --batch --list-secret-keys --with-colons | awk -F: '$1 == "fpr" && !k { k = $10 } END { print k }')
+          key=$(gpg --batch --list-secret-keys --with-colons | awk -F: '$1 == "fpr" && !key { key = $10 } END { print key }')
           test -n "$key"
           echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
           echo "GPG_KEY=$key" >> "$GITHUB_ENV"
 
-      - name: Build
-        run: >-
-          flatpak-builder --disable-rofiles-fuse --force-clean
-          --repo=repo --gpg-sign="$GPG_KEY" --gpg-homedir="$GNUPGHOME"
-          build-dir "flatpak/$APP_ID.yml"
+      - name: Sign and prepare update repository
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.PUBLISH_FLATPAK == 'true'
+        env:
+          REPO_URL: ${{ vars.FLATPAK_REPO_URL || format('https://{0}.github.io/{1}/', github.repository_owner, github.event.repository.name) }}
+        run: bash scripts/prepare-repository.sh
 
-      # Each run publishes a fresh repository holding only this build. Clients
-      # only need the newest commit, and unchanged files aren't downloaded again.
-      - name: Prepare repository
+      - name: Verify signed software catalog
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.PUBLISH_FLATPAK == 'true'
         run: |
-          flatpak build-update-repo --gpg-sign="$GPG_KEY" --gpg-homedir="$GNUPGHOME" \
-            --title="Reddit Migration" --default-branch=master repo
-          rm -rf repo/tmp
-          gpg_key=$(gpg --export --export-options export-minimal "$GPG_KEY" | base64 -w0)
-          cat > repo/reddit-migration.flatpakrepo <<EOF
-          [Flatpak Repo]
-          Title=Reddit Migration
-          Url=$REPO_URL
-          Homepage=https://github.com/nosini/reddit-migration
-          GPGKey=$gpg_key
-          EOF
-          cat > repo/reddit-migration.flatpakref <<EOF
-          [Flatpak Ref]
-          Name=$APP_ID
-          Branch=master
-          Title=Reddit Migration
-          Url=$REPO_URL
-          RuntimeRepo=https://dl.flathub.org/repo/flathub.flatpakrepo
-          IsRuntime=false
-          SuggestRemoteName=reddit-migration
-          GPGKey=$gpg_key
-          EOF
+          public_key_file="$RUNNER_TEMP/reddit-migration-signing-public-key.gpg"
+          gpg --batch --export --export-options export-minimal "$GPG_KEY" > "$public_key_file"
+          test -s "$public_key_file"
+          flatpak --user remote-add --gpg-import="$public_key_file" signed-test "$PWD/signed-repo"
+          flatpak --user update --appstream signed-test
+          python3 scripts/check-appstream.py \
+            "${XDG_DATA_HOME:-$HOME/.local/share}/flatpak/appstream/signed-test/x86_64/active"
+          flatpak --user remote-delete signed-test
+          rm -f "$public_key_file"
+
+      - name: Remove imported key
+        if: always()
+        run: |
+          if [[ -d "$RUNNER_TEMP/reddit-migration-gnupg" ]]; then
+            GNUPGHOME="$RUNNER_TEMP/reddit-migration-gnupg" gpgconf --kill all || true
+            rm -rf "$RUNNER_TEMP/reddit-migration-gnupg"
+          fi
 
       - uses: actions/upload-pages-artifact@v5
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.PUBLISH_FLATPAK == 'true'
         with:
-          path: repo
+          path: signed-repo
 
   deploy:
     needs: build
-    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.PUBLISH_FLATPAK == 'true'
+    runs-on: ubuntu-24.04
     permissions:
+      contents: read
       pages: write
       id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Check main immediately before publishing
+        env:
+          BASE_COMMIT: ${{ github.sha }}
+        run: bash scripts/check-main.sh "$BASE_COMMIT"
+
       - id: deployment
         uses: actions/deploy-pages@v5
