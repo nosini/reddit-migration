@@ -1,35 +1,39 @@
 #!/usr/bin/env bash
-# Run from the repository root after exporting a build to repo/.
+# Install the build exported to repo/ and run tests/check-installed.sh inside
+# the installed app's sandbox, so the checks run against the Platform runtime
+# rather than the SDK, followed by the unit tests. Run from anywhere after
+# building with --repo=repo.
 set -euo pipefail
+cd "$(dirname "$0")/.."
 
+: "${APP_ID:=$(sed -n 's/^id: *//p' ./*.yml)}"
+: "${FLATPAK_BRANCH:=stable}"
+: "${FLATPAK_ARCH:=$(flatpak --default-arch)}"
+ref="app/$APP_ID/$FLATPAK_ARCH/$FLATPAK_BRANCH"
+
+if ! flatpak --user remotes --columns=name | grep -qx local-test; then
+  flatpak --user remote-add --no-gpg-verify local-test "$PWD/repo"
+fi
 url=$(flatpak --user remotes --columns=name,url | awk '$1 == "local-test" { print $2 }')
 if [[ "$url" != "file://$PWD/repo" ]]; then
-  echo 'Add local-test pointing to this build before running the checks:' >&2
-  echo "  flatpak --user remote-add --no-gpg-verify local-test \"\$PWD/repo\"" >&2
+  echo "The local-test remote points to $url, not this checkout's repo/." >&2
+  echo 'Remove it with: flatpak --user remote-delete local-test' >&2
   exit 1
 fi
 
-# Avoid replacing an existing user installation when running locally.
-ref=app/eu.nosini.RedditMigration/x86_64/stable
+# Don't replace an existing installation when running locally.
 if flatpak info --user "$ref" >/dev/null 2>&1; then
   echo "These checks need a fresh installation; $ref is already installed." >&2
+  echo "Remove it with: flatpak --user uninstall $ref" >&2
   exit 1
 fi
 
-test -s build-dir/export/share/icons/hicolor/scalable/apps/eu.nosini.RedditMigration.svg
-test -s build-dir/export/share/applications/eu.nosini.RedditMigration.desktop
-
+# flatpak-builder doesn't always refresh the summary of an existing repo.
 flatpak build-update-repo repo
 flatpak --user install --noninteractive --no-related local-test "$ref"
-version=$(flatpak run --user --arch=x86_64 --branch=stable eu.nosini.RedditMigration --version)
-expected=$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
-if [[ "$version" != "reddit_migration $expected" ]]; then
-  echo "Unexpected version output: $version (expected $expected)" >&2
-  exit 1
-fi
-# -P keeps a checkout in the working directory from shadowing the installed package.
-flatpak run --user --arch=x86_64 --branch=stable \
-  --command=python3 eu.nosini.RedditMigration -P - < scripts/check-installed.py
+flatpak run --user --arch="$FLATPAK_ARCH" --branch="$FLATPAK_BRANCH" \
+  --command=sh "$APP_ID" -s < tests/check-installed.sh
 # The unit tests, against the installed package and the pinned dependencies.
-flatpak run --user --arch=x86_64 --branch=stable --filesystem="$PWD/tests:ro" \
-  --command=python3 eu.nosini.RedditMigration -P -m unittest discover -s "$PWD/tests"
+flatpak run --user --arch="$FLATPAK_ARCH" --branch="$FLATPAK_BRANCH" \
+  --filesystem="$PWD/tests:ro" --command=python3 "$APP_ID" \
+  -P -m unittest discover -s "$PWD/tests"

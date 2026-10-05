@@ -20,6 +20,16 @@
   <url type="homepage">https://github.com/nosini/reddit-migration</url>
   <url type="bugtracker">https://github.com/nosini/reddit-migration/issues</url>
   <url type="vcs-browser">https://github.com/nosini/reddit-migration</url>
+  <screenshots>
+    <screenshot type="default">
+      <caption>The command-line options</caption>
+      <image>https://raw.githubusercontent.com/nosini/reddit-migration/main/docs/screenshots/help.png</image>
+    </screenshot>
+  </screenshots>
+  <branding>
+    <color type="primary" scheme_preference="light">#ffc2a8</color>
+    <color type="primary" scheme_preference="dark">#7a2810</color>
+  </branding>
   <provides>
     <binary>reddit_migration</binary>
   </provides>
@@ -28,6 +38,15 @@
   </categories>
   <content_rating type="oars-1.1"/>
   <releases>
-    <release version="1.0.1" date="2026-09-21"/>
+    <release version="1.0.1" date="2026-09-21">
+      <description>
+        <ul>
+          <li>Failed items are reported, and the run ends with status 1 when any item fails</li>
+          <li>External sources are saved before the item is unsaved on Reddit</li>
+          <li>New options: --version, --skip-comments, --update-config and a configurable state file</li>
+          <li>Migrating to the same account and missing config files given explicitly are refused</li>
+        </ul>
+      </description>
+    </release>
   </releases>
 </component>

@@ -1,0 +1,8 @@
+{
+  "eu.nosini.RedditMigration": {
+    "appid-url-not-reachable": "nosini.eu has no website yet; the linter requires https://nosini.eu to answer.",
+    "appstream-external-screenshot-url": "Self-hosted repository: screenshots stay at their GitHub URLs instead of Flathub's media mirror.",
+    "appstream-screenshots-not-mirrored-in-ostree": "Self-hosted repository: no screenshots ref is published.",
+    "finish-args-unnecessary-xdg-config-reddit_migration-create-access": "The host's ~/.config/reddit_migration is shared on purpose, so a pipx install and the Flatpak use the same config and migration state."
+  }
+}

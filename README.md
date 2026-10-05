@@ -4,7 +4,7 @@ Migrate saved Reddit items from one account to another. OAuth refresh tokens
 (and the client id / user agent) are stored in **GNOME Keyring** — visible in
 Seahorse — so nothing sensitive lives in shell history or dotfiles.
 
-## Install
+## Installing
 
 ### Flatpak
 
@@ -17,32 +17,15 @@ flatpak install --user https://nosini.github.io/reddit-migration/reddit-migratio
 ```
 
 This adds a remote named `reddit-migration`. Updates come through it like any
-other Flatpak, from GNOME Software or with:
+other Flatpak, from your software center or with:
 
 ```sh
 flatpak update --user eu.nosini.RedditMigration
 ```
 
-The package is built for x86_64. Run it with
-`flatpak run eu.nosini.RedditMigration`, followed by the options described
-under [Usage](#usage). For the short command name, add an alias to your shell:
-
-```sh
-alias reddit_migration='flatpak run eu.nosini.RedditMigration'
-```
-
-It also adds a **Reddit Migration** entry to the application menu. The entry
-runs the migration in a terminal, and its right-click actions start a dry run
-or `--login`. The terminal stays open after the run until you press Enter.
-
-The app can reach the network, GNOME Keyring and `~/.config/reddit_migration`,
-so it shares tokens, config and state with a pipx install. Inside the sandbox
-that folder also appears as
-`~/.var/app/eu.nosini.RedditMigration/config/reddit_migration`, which is the
-path `--write-config` reports; both names refer to the same files. The app
-can't see the rest of your home directory. Grant access with
-`flatpak override --user --filesystem=PATH eu.nosini.RedditMigration` before
-passing `--config`/`--state-file` paths outside that folder.
+Reddit Migration is also available from the shared
+[nosini remote](https://github.com/nosini/flatpak-repo), together with the
+other packages published there. Packages are built for x86_64 and aarch64.
 
 #### Switching from an earlier install
 
@@ -97,6 +80,29 @@ that they come from the keyring), and for the OAuth **redirect port** (default
 app's redirect URI — the migrator itself doesn't use it. Because Reddit keeps
 one account logged in per browser session, authorize account 1 in your normal
 window and account 2 in a private/incognito window.
+
+### Running the Flatpak
+
+Run the Flatpak with `flatpak run eu.nosini.RedditMigration`, followed by the
+options above. For the short command name, add an alias to your shell:
+
+```sh
+alias reddit_migration='flatpak run eu.nosini.RedditMigration'
+```
+
+The Flatpak also adds a **Reddit Migration** entry to the application menu.
+The entry runs the migration in a terminal, and its right-click actions start
+a dry run or `--login`. The terminal stays open after the run until you press
+Enter.
+
+The Flatpak shares tokens, config and state with a pipx install: they live in
+GNOME Keyring and `~/.config/reddit_migration` for both. Inside the sandbox
+that folder also appears as
+`~/.var/app/eu.nosini.RedditMigration/config/reddit_migration`, which is the
+path `--write-config` reports; both names refer to the same files. Before
+passing `--config` or `--state-file` paths outside that folder, give the app
+access to them with
+`flatpak override --user --filesystem=PATH eu.nosini.RedditMigration`.
 
 ## Configuration
 
@@ -170,6 +176,19 @@ durable place to set things.
 Environment variables still override the keyring if set:
 `REDDIT_CLIENT_ID`, `REDDIT_USER_AGENT`, `REDDIT_ACCOUNT1_REFRESH_TOKEN`,
 `REDDIT_ACCOUNT2_REFRESH_TOKEN`.
+
+## Flatpak permissions
+
+The Flatpak can:
+
+- reach the network, for the Reddit API and for the login page's redirect to
+  `localhost` during `--login`;
+- talk to GNOME Keyring (the Secret Service), where the tokens are stored;
+- read and write `~/.config/reddit_migration`, for the config file and the
+  external-source vault;
+- open the Reddit login page in your browser, through the desktop portal.
+
+It can't see the rest of your home directory or other files.
 
 ## License
 

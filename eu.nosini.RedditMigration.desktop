@@ -5,7 +5,7 @@ Comment=Move saved Reddit items from one account to another
 Exec=reddit_migration-terminal
 Icon=eu.nosini.RedditMigration
 Terminal=true
-Categories=Network;Utility;
+Categories=Network;
 Keywords=reddit;saved;migrate;
 Actions=dry-run;login;
 

@@ -21,9 +21,11 @@ config.toml
 *.swp
 .DS_Store
 
-# Flatpak build output
-.flatpak-builder/
-build-dir/
-repo/
-signed-repo/
+# flatpak-builder output
+/.flatpak-builder/
+/build-dir/
+/repo/
+/signed-repo/
 *.flatpak
+# Generator checkouts and virtual environments (scripts/builder-tools.sh)
+/.cache/
