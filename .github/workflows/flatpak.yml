@@ -161,20 +161,28 @@ jobs:
         run: bash scripts/prepare-repository.sh inputs/repo-*/repo
 
       # A client that only knows the public key must accept the summary, the
-      # app and the software catalog.
+      # app and the software catalog of every architecture. Flatpak only
+      # loads the summaries of the runner's own architecture when updating
+      # catalogs, so the catalog commits are pulled with OSTree, which
+      # rejects them unless they are signed.
       - name: Verify the signed repository
         run: |
           public_key_file="$RUNNER_TEMP/signing-public-key.gpg"
           gpg --batch --export --export-options export-minimal "$GPG_KEY" > "$public_key_file"
           test -s "$public_key_file"
           flatpak --user remote-add --gpg-import="$public_key_file" signed-test "$PWD/signed-repo"
-          flatpak --user remote-ls --all signed-test | grep -F "$APP_ID"
+          verify_repo="$RUNNER_TEMP/verify-repo"
+          ostree --repo="$verify_repo" init --mode=bare-user-only
+          ostree --repo="$verify_repo" remote add --set=gpg-verify-summary=true \
+            --gpg-import="$public_key_file" signed-test "file://$PWD/signed-repo"
           for arch in $(ostree --repo=signed-repo refs | sed -n "s|^app/$APP_ID/\([^/]*\)/.*|\1|p"); do
-            flatpak --user update --noninteractive --appstream --arch="$arch" signed-test
-            catalog="${XDG_DATA_HOME:-$HOME/.local/share}/flatpak/appstream/signed-test/$arch/active/appstream.xml.gz"
-            gzip -dc "$catalog" | grep -qF "<id>$APP_ID</id>"
+            flatpak --user remote-ls --arch="$arch" signed-test | grep -F "$APP_ID"
+            ostree --repo="$verify_repo" pull signed-test "appstream2/$arch"
+            ostree --repo="$verify_repo" cat "signed-test:appstream2/$arch" /appstream.xml \
+              | grep -qF "<id>$APP_ID</id>"
           done
           flatpak --user remote-delete signed-test
+          rm -rf "$verify_repo"
 
       - name: Remove imported key
         if: always()
