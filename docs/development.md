@@ -20,6 +20,7 @@
 - `scripts/test-installed.sh`: installs a local build and runs those checks
   and the unit tests.
 - `scripts/prepare-repository.sh`: signs tested builds for publishing.
+- `scripts/tests/`: tests for these scripts.
 - `scripts/builder-tools.sh`: fetches the pinned
   [flatpak-builder-tools](https://github.com/flatpak/flatpak-builder-tools).
 - `docs/screenshots/`: the screenshot shown in software centers.
@@ -91,6 +92,28 @@ remove the test installation with
 `flatpak --user uninstall eu.nosini.RedditMigration` and the remote with
 `flatpak --user remote-delete local-test`.
 
+## Debugging
+
+A shell in the sandbox of the last build, without installing it:
+
+```sh
+flatpak run org.flatpak.Builder --run build-dir eu.nosini.RedditMigration.yml sh
+```
+
+A shell in the installed app's sandbox, with the SDK and its debugging tools
+in place of the Platform runtime (the SDK must be installed):
+
+```sh
+flatpak run --devel --command=sh eu.nosini.RedditMigration
+```
+
+To see which D-Bus names the app tries to reach, and so which `--talk-name`
+permissions it needs:
+
+```sh
+flatpak run --log-session-bus eu.nosini.RedditMigration 2>&1 | grep '(required 1)'
+```
+
 ## GitHub Actions
 
 `.github/workflows/flatpak.yml` runs for pushes to `main`, pull requests and
@@ -104,23 +127,41 @@ Bundles are unsigned and don't update; the published repository does.
 CI builds for x86_64 and aarch64, like Flathub. The aarch64 build uses
 GitHub's Arm runners, which are free for public repositories only.
 
+`.github/workflows/checks.yml` lints the scripts and workflows, checks that
+the manifest and metadata files parse, and runs the tests in
+`scripts/tests/`. The publishing test makes small fake builds and publishes
+them several times to a local web server.
+
 ### Publishing
 
 On `main`, when the repository variable `PUBLISH_FLATPAK` is `true`, the
 workflow also publishes a signed Flatpak repository to GitHub Pages. A
-separate job, which never runs the build, combines the tested builds of all
-architectures, signs the app ref, generates and signs the software catalog
-and summary, and writes `reddit-migration.flatpakrepo` and
-`reddit-migration.flatpakref` with the public key embedded. Before deploying,
-a fresh remote that only knows the public key must accept the result.
+separate job, which never runs the build, downloads the published repository
+and checks it against the signing key. It adds the tested builds of all
+architectures as new signed commits, generates static deltas, signs a new
+software catalog and summary, and writes `reddit-migration.flatpakrepo` and
+`reddit-migration.flatpakref` with the public key embedded. Both files take
+the app's summary from its metainfo and point to a copy of its icon, which
+software centers show when the remote or app is added. Before deploying, a
+fresh remote that only knows the public key must accept the result.
 
 The catalog refs are deleted before signing because `flatpak
 build-update-repo` reuses unchanged catalog commits, including the unsigned
 ones from the test repositories, without signing them.
 
-Each deployment contains only the latest build. The repository URL defaults
-to `https://OWNER.github.io/REPOSITORY/`. For a custom domain, set the
-`FLATPAK_REPO_URL` variable to the real URL, including the trailing slash.
+The repository keeps the five previous versions of the app, so users can go
+back to one with `flatpak update --commit`. A build whose files didn't
+change adds no version. Static deltas let Flatpak download an install or
+update as a few large files instead of one request per file. They add about
+a third to the repository's size, and each kept version adds only the files
+that changed. If the published repository can't be downloaded or doesn't
+match the signing key, for example after replacing the key, the job fails.
+Set the variable `FLATPAK_KEEP_HISTORY` to `false` to publish a new
+repository without the earlier versions.
+
+The repository URL defaults to `https://OWNER.github.io/REPOSITORY/`. For a
+custom domain, set the `FLATPAK_REPO_URL` variable to the real URL,
+including the trailing slash.
 
 To set publishing up:
 
@@ -218,13 +259,28 @@ The script runs flatpak-pip-generator from flatpak-builder-tools with pip
 inside the manifest's SDK, so dependency markers match the runtime's Python.
 It needs `flatpak run` and the SDK (`flatpak install --user flathub
 org.freedesktop.Sdk//26.08`). It prefers pure-Python wheels and otherwise
-source archives, except for cryptography and cffi, which need a Rust or C
-toolchain to build and use prebuilt wheels for x86_64 and aarch64. The
-generator doesn't evaluate `python_version` markers, so the script leaves
-out tomli, which is only needed before Python 3.11. The generator also
-expects the SDK to have the `packaging` module for reading wheel tags; the
-Freedesktop SDK only has pip's copy, so the script runs a copy of the
-generator that imports that one.
+source archives, except for the packages in `PREFER_WHEELS`, by default
+cryptography and cffi, which need a Rust or C toolchain to build and use
+prebuilt wheels for x86_64 and aarch64.
+
+The script works around three problems of the generator. It doesn't
+evaluate markers on the listed requirements, so
+`scripts/filter-requirements.py` leaves out lines whose markers don't apply
+to the runtime's Python on Linux, for every architecture CI builds (tomli,
+for example, is only needed before Python 3.11), and removes the markers of
+the lines it keeps, so pip doesn't evaluate them again for the machine it
+runs on. A requirement needed on only some architectures stops the script;
+add such a package as a module with `only-arches` instead. The generator
+also skips packaging, pip, wheel, Cython and Meson, which are in the SDK but
+not in the Platform, so the script tells it to bundle them when the app
+needs them. And for `--prefer-wheels` it imports `packaging` inside the
+SDK, which only has pip's copy, so the script runs a copy of the generator
+that imports that one.
+
+Without a working `flatpak run`, set `PIP_GENERATOR_PYTHON` to an
+interpreter of the runtime's Python version, for example
+`PIP_GENERATOR_PYTHON=python3.14`. Then pip runs there, and prebuilt wheels
+aren't available, so `PREFER_WHEELS` must be empty.
 
 ## Releases
 

@@ -23,6 +23,17 @@ other Flatpak, from your software center or with:
 flatpak update --user eu.nosini.RedditMigration
 ```
 
+If an update causes problems, the `reddit-migration` remote still has the
+five previous versions. List them and go back to one by its commit:
+
+```sh
+flatpak remote-info --user --log reddit-migration eu.nosini.RedditMigration
+flatpak update --user --commit=COMMIT eu.nosini.RedditMigration
+```
+
+`flatpak mask --user eu.nosini.RedditMigration` then keeps it from updating
+until you run `flatpak mask --user --remove eu.nosini.RedditMigration`.
+
 Reddit Migration is also available from the shared
 [nosini remote](https://github.com/nosini/flatpak-repo), together with the
 other packages published there. Packages are built for x86_64 and aarch64.

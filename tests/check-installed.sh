@@ -1,3 +1,4 @@
+# shellcheck shell=sh
 # Runs inside the installed app's sandbox (see scripts/test-installed.sh).
 # There is no display, keyring or session bus in CI, so keep these checks
 # headless: start the command-line interface, import modules, look for files.
