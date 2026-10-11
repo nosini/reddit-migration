@@ -107,12 +107,9 @@ a dry run or `--login`. The terminal stays open after the run until you press
 Enter.
 
 The Flatpak shares tokens, config and state with a pipx install: they live in
-GNOME Keyring and `~/.config/reddit_migration` for both. Inside the sandbox
-that folder also appears as
-`~/.var/app/eu.nosini.RedditMigration/config/reddit_migration`, which is the
-path `--write-config` reports; both names refer to the same files. Before
-passing `--config` or `--state-file` paths outside that folder, give the app
-access to them with
+GNOME Keyring and `~/.config/reddit_migration` for both. Before passing
+`--config` or `--state-file` paths outside that folder, give the app access to
+them with
 `flatpak override --user --filesystem=PATH eu.nosini.RedditMigration`.
 
 ## Configuration

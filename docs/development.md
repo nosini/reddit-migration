@@ -230,10 +230,11 @@ The sandbox has these permissions:
   install and visible in Seahorse;
 - `~/.config/reddit_migration`. Flatpak mounts the host folder both at its
   own path and under the app's private `XDG_CONFIG_HOME`
-  (`~/.var/app/eu.nosini.RedditMigration/config`), where the app looks for it.
-  The default paths therefore reach the host's files without changing
-  `XDG_CONFIG_HOME`. The linter reports this grant as unnecessary; it is an
-  exception in `lint-exceptions.json`.
+  (`~/.var/app/eu.nosini.RedditMigration/config`). On the host the private
+  copy is an empty mount point, so when `/.flatpak-info` exists the app builds
+  its default paths from `HOST_XDG_CONFIG_HOME` (or `~/.config`) instead, and
+  the paths it prints can be opened on the host. The linter reports this grant
+  as unnecessary; it is an exception in `lint-exceptions.json`.
 
 Python's `webbrowser` only tries `xdg-open` when a display socket is
 available, and the app has none. `BROWSER=xdg-open` makes `--login` call it

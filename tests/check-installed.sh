@@ -37,12 +37,12 @@ assert version == f"reddit_migration {release}", (version, release)
 assert os.environ.get("BROWSER") == "xdg-open"
 assert shutil.which("xdg-open"), "xdg-open is missing from the runtime"
 
-# The host's config folder is mounted under the app's XDG_CONFIG_HOME, so the
-# default paths resolve to the files a pipx install uses.
+# The default paths are the host's config folder, which a pipx install also
+# uses, so the paths the app prints can be opened on the host.
 host_config = Path(os.environ.get("HOST_XDG_CONFIG_HOME") or Path.home() / ".config")
 app_folder = config_path().parent
+assert app_folder == host_config / "reddit_migration", app_folder
 assert app_folder.is_dir(), app_folder
-assert app_folder.samefile(host_config / "reddit_migration"), app_folder
 PYTHON
 
 # flatpak-builder records the license files it finds at the root of each

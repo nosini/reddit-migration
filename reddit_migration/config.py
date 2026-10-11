@@ -6,6 +6,8 @@ Config lives at (first match wins):
   3. $XDG_CONFIG_HOME/reddit_migration/config.toml
   4. ~/.config/reddit_migration/config.toml
 
+Inside the Flatpak the host's config folder is used (see _config_home).
+
 The file is optional; without it the built-in defaults apply. CLI flags
 (--only / --skip / --source-domain) union on top of whatever the config
 resolves to.
@@ -23,6 +25,8 @@ from typing import Optional
 DEFAULT_SOURCE_DOMAINS = ["pixiv.net", "danbooru.donmai.us", "gelbooru.com"]
 
 DEFAULT_STATE_FILENAME = "migrated_sources.json"
+
+FLATPAK_INFO = Path("/.flatpak-info")
 
 # The commented config template. The {placeholders} are filled by
 # render_config, so --update-config can re-render it with the values from an
@@ -62,14 +66,24 @@ file = {state_file}
 """
 
 
+def _config_home() -> Path:
+    # Flatpak points XDG_CONFIG_HOME at the app's private folder and mounts the
+    # host's reddit_migration folder both there and at its host path. Use the
+    # host path, so the paths we print are ones the user can open on the host.
+    if FLATPAK_INFO.exists():
+        base = os.environ.get("HOST_XDG_CONFIG_HOME")
+    else:
+        base = os.environ.get("XDG_CONFIG_HOME")
+    return Path(base) if base else Path.home() / ".config"
+
+
 def config_path(explicit: Optional[str] = None) -> Path:
     if explicit:
         return Path(explicit).expanduser()
     env = os.environ.get("REDDIT_MIGRATION_CONFIG")
     if env:
         return Path(env).expanduser()
-    base = os.environ.get("XDG_CONFIG_HOME") or (Path.home() / ".config")
-    return Path(base) / "reddit_migration" / "config.toml"
+    return _config_home() / "reddit_migration" / "config.toml"
 
 
 @dataclass
@@ -149,8 +163,7 @@ def resolve_state_path(cfg: Config) -> Path:
     legacy = Path(DEFAULT_STATE_FILENAME)
     if legacy.exists():
         return legacy
-    base = os.environ.get("XDG_CONFIG_HOME") or (Path.home() / ".config")
-    return Path(base) / "reddit_migration" / DEFAULT_STATE_FILENAME
+    return _config_home() / "reddit_migration" / DEFAULT_STATE_FILENAME
 
 
 def write_default_config(explicit: Optional[str] = None) -> Path:

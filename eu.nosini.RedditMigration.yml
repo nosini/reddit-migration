@@ -8,8 +8,8 @@ finish-args:
   - --share=network
   # OAuth tokens live in GNOME Keyring (Secret Service), shared with a pipx install.
   - --talk-name=org.freedesktop.secrets
-  # Same config and state folder as a pipx install. Flatpak also mounts it
-  # under the app's own XDG_CONFIG_HOME, where reddit_migration looks for it.
+  # Same config and state folder as a pipx install. reddit_migration uses the
+  # host path, not the copy Flatpak also mounts under the app's XDG_CONFIG_HOME.
   - --filesystem=xdg-config/reddit_migration:create
   # Python's webbrowser only tries xdg-open when a display socket is present;
   # point it there directly so --login opens the host browser via the portal.
