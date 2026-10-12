@@ -116,9 +116,12 @@ flatpak run --log-session-bus eu.nosini.RedditMigration 2>&1 | grep '(required 1
 
 ## GitHub Actions
 
-`.github/workflows/flatpak.yml` runs for pushes to `main`, pull requests and
-manual runs. For each architecture, it lints the manifest and metainfo,
-builds with [flatpak-github-actions](https://github.com/flatpak/flatpak-github-actions),
+`.github/workflows/flatpak.yml` runs when a `v*` version tag is pushed,
+for pull requests and on manual runs. Release builds check out the tagged
+commit. Pushes to `main` run the lightweight checks without building the
+Flatpak. For each architecture, the packaging workflow lints the manifest
+and metainfo, builds with
+[flatpak-github-actions](https://github.com/flatpak/flatpak-github-actions),
 lints the exported build, runs the installed-app checks and the unit tests,
 and uploads an installable bundle as an artifact. Install a downloaded
 artifact with `flatpak install --user reddit-migration-x86_64.flatpak`.
@@ -129,15 +132,23 @@ GitHub's Arm runners, which are free for public repositories only.
 
 `.github/workflows/checks.yml` lints the scripts and workflows, checks that
 the manifest and metadata files parse, and runs the tests in
-`scripts/tests/`. The publishing test makes small fake builds and publishes
-them several times to a local web server.
+`scripts/tests/`, including release tag classification and release creation
+with a fake GitHub CLI. The publishing test makes small fake builds and
+publishes them several times to a local web server.
 
 ### Publishing
 
-On `main`, when the repository variable `PUBLISH_FLATPAK` is `true`, the
-workflow also publishes a signed Flatpak repository to GitHub Pages. A
-separate job, which never runs the build, downloads the published repository
-and checks it against the signing key. It adds the tested builds of all
+When the repository variable `PUBLISH_FLATPAK` is `true`, pushing a stable
+version tag publishes a signed Flatpak repository to GitHub Pages. Manual
+builds on `main` also publish. Pull requests and prerelease tags only build
+and test bundles. After a tag build passes, the workflow creates its GitHub
+Release with the runner's `GITHUB_TOKEN` and attaches the tested bundles
+for every architecture. When stable publication is enabled, the release
+waits for the signed repository's validation and Pages deployment to
+succeed. Reruns replace assets on an existing release.
+
+A separate job, which never runs the build, downloads the published
+repository and checks it against the signing key. It adds the tested builds of all
 architectures as new signed commits, generates static deltas, signs a new
 software catalog and summary, and writes `reddit-migration.flatpakrepo` and
 `reddit-migration.flatpakref` with the public key embedded. Both files take
@@ -170,7 +181,26 @@ To set publishing up:
    below).
 3. Set the variable:
    `gh variable set PUBLISH_FLATPAK --body true --repo nosini/reddit-migration`.
-4. Run the workflow on `main`, or push to it.
+4. Push a version tag pointing to the commit to build, or run the Flatpak
+   workflow manually on `main`.
+
+Stable tags have the form `v1.0.1`. A numeric suffix such as `v1.0.1-1`
+identifies a stable packaging revision of the same app version. Other
+suffixes, such as `v1.0.2-rc1`, create GitHub prereleases without replacing
+the stable Flatpak repository or becoming the latest stable GitHub Release.
+Tag the commit containing the intended app version, metadata and workflow:
+
+```sh
+git tag -s v1.0.1 -m 'Reddit Migration 1.0.1'
+git push origin v1.0.1
+```
+
+There is no need to publish a GitHub Release manually to start the build.
+If **Settings → Environments → github-pages** restricts deployments to
+selected branches and tags, add a Tag rule for `v*` and retain the Branch
+rule for `main` so manual publication remains available.
+[Deployment rules](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments#deployment-branches-and-tags)
+must permit version tags separately from branches.
 
 ### Signing key
 

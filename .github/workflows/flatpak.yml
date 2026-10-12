@@ -2,7 +2,7 @@ name: Flatpak
 
 on:
   push:
-    branches: [main]
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -27,17 +27,36 @@ jobs:
     outputs:
       matrix: ${{ steps.arches.outputs.matrix }}
       publish: ${{ steps.arches.outputs.publish }}
+      stable: ${{ steps.release.outputs.stable }}
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
+
+      # Numeric packaging revisions are stable; other suffixes must not
+      # replace the signed stable repository.
+      - name: Classify the release tag
+        id: release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          stable=false
+          if [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9]+)?$ ]]; then
+            stable=true
+          fi
+          echo "stable=$stable" >> "$GITHUB_OUTPUT"
 
       # Like Flathub, build x86_64 and aarch64 unless flathub.json limits the
       # architectures with only-arches or skip-arches.
       - name: Select architectures
         id: arches
         env:
-          PUBLISH: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.PUBLISH_FLATPAK == 'true' }}
+          PUBLISH: >-
+            ${{ vars.PUBLISH_FLATPAK == 'true' &&
+                ((startsWith(github.ref, 'refs/tags/v') && steps.release.outputs.stable == 'true') ||
+                 (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')) }}
         run: |
           config=$(cat flathub.json 2>/dev/null || echo '{}')
           matrix=$(jq -c '
@@ -67,6 +86,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
           submodules: true
 
@@ -122,6 +142,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
 
       - uses: actions/download-artifact@v8
@@ -209,3 +230,47 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v5
+
+  # Wait for the tested builds and any required stable publication before
+  # creating the release. The runner authenticates with GITHUB_TOKEN.
+  release:
+    needs: [setup, build, publish, deploy]
+    if: >-
+      ${{ !cancelled() && startsWith(github.ref, 'refs/tags/v') &&
+          needs.setup.result == 'success' && needs.build.result == 'success' &&
+          ((needs.setup.outputs.publish == 'true' && needs.publish.result == 'success' &&
+            needs.deploy.result == 'success') ||
+           (needs.setup.outputs.publish == 'false' && needs.publish.result == 'skipped' &&
+            needs.deploy.result == 'skipped')) }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+      STABLE: ${{ needs.setup.outputs.stable }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: ${{ env.REMOTE_NAME }}-*
+          path: bundles
+          merge-multiple: true
+
+      - name: Create the release and upload the tested bundles
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            if [[ "$STABLE" != true ]]; then
+              gh release edit "$TAG" --prerelease --latest=false
+            fi
+            gh release upload "$TAG" bundles/*.flatpak --clobber
+          else
+            options=(--verify-tag --title "$APP_NAME ${TAG#v}" --generate-notes)
+            if [[ "$STABLE" != true ]]; then
+              options+=(--prerelease --latest=false)
+            fi
+            gh release create "$TAG" bundles/*.flatpak "${options[@]}"
+          fi

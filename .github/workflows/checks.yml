@@ -47,7 +47,7 @@ jobs:
               ET.parse(path)
           EOF
 
-      - name: Test the requirement filter
+      - name: Test the requirement filter and release workflow
         run: python -m unittest discover -s scripts/tests -p 'test_*.py' -v
 
       - name: Test the Python dependency generator
