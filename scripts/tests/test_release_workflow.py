@@ -2,10 +2,12 @@
 """Exercise release classification and GitHub CLI commands without publishing."""
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from types import SimpleNamespace
 
 import yaml
 
@@ -124,6 +126,74 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(len(commands), 1)
         self.assertEqual(commands[0][1], "edit")
+
+    def evaluate(self, expression, **context):
+        # Evaluate the workflow's boolean expressions against event/job cases.
+        expression = expression.removeprefix("${{").removesuffix("}}")
+        expression = expression.replace("&&", " and ").replace("||", " or ")
+        expression = re.sub(r"!(?!=)", " not ", expression)
+        cancelled = context.pop("cancelled", False)
+        return eval(" ".join(expression.split()), {"__builtins__": {}}, {
+            "startsWith": lambda value, prefix: value.startswith(prefix),
+            "cancelled": lambda: cancelled,
+            **context,
+        })
+
+    def test_publication_event_policy(self):
+        arches = next(step for step in WORKFLOW["jobs"]["setup"]["steps"]
+                      if step.get("id") == "arches")
+        for event, ref, stable, enabled, expected in (
+            ("push", "refs/tags/v1.2.3", "true", "true", True),
+            ("push", "refs/tags/v1.2.3-rc1", "false", "true", False),
+            ("push", "refs/tags/v1.2.3", "true", "false", False),
+            ("push", "refs/heads/main", "", "true", False),
+            ("workflow_dispatch", "refs/heads/main", "", "true", True),
+            ("workflow_dispatch", "refs/heads/update/upstream", "", "true", False),
+            ("workflow_dispatch", "refs/tags/v1.2.3-rc1", "false", "true", False),
+            ("pull_request", "refs/pull/1/merge", "", "true", False),
+        ):
+            for cache_only in (False, True):
+                with self.subTest(event=event, ref=ref, enabled=enabled,
+                                  cache_only=cache_only):
+                    actual = self.evaluate(
+                        arches["env"]["PUBLISH"],
+                        github=SimpleNamespace(event_name=event, ref=ref),
+                        inputs=SimpleNamespace(cache_only=cache_only),
+                        vars=SimpleNamespace(PUBLISH_FLATPAK=enabled),
+                        steps=SimpleNamespace(release=SimpleNamespace(
+                            outputs=SimpleNamespace(stable=stable))),
+                    )
+                    self.assertEqual(actual, expected and not cache_only)
+
+    def test_release_waits_for_validation_and_required_deployment(self):
+        for publish in ("true", "false"):
+            defaults = dict(setup="success", build="success",
+                            publish="success" if publish == "true" else "skipped",
+                            deploy="success" if publish == "true" else "skipped")
+            cases = [(defaults, "refs/tags/v1.2.3", False, True),
+                     (defaults, "refs/tags/v1.2.3-rc1", False, True),
+                     (defaults, "refs/heads/main", False, False),
+                     (defaults, "refs/tags/v1.2.3", True, False)]
+            for job in defaults:
+                for result in ("failure", "cancelled", "skipped"):
+                    if result != defaults[job]:
+                        cases.append((dict(defaults, **{job: result}),
+                                      "refs/tags/v1.2.3", False, False))
+            for results, ref, cancelled, expected in cases:
+                for cache_only in (False, True):
+                    with self.subTest(publish=publish, results=results, ref=ref,
+                                      cache_only=cache_only):
+                        needs = SimpleNamespace(**{
+                            job: SimpleNamespace(result=result)
+                            for job, result in results.items()
+                        })
+                        needs.setup.outputs = SimpleNamespace(publish=publish)
+                        actual = self.evaluate(
+                            WORKFLOW["jobs"]["release"]["if"], needs=needs,
+                            inputs=SimpleNamespace(cache_only=cache_only),
+                            github=SimpleNamespace(ref=ref), cancelled=cancelled,
+                        )
+                        self.assertEqual(actual, expected and not cache_only)
 
 
 if __name__ == "__main__":
