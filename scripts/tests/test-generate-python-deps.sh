@@ -7,6 +7,7 @@ set -euo pipefail
 root=$(realpath "$(dirname "$0")/../..")
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
+python=${PIP_GENERATOR_PYTHON:-python3}
 
 mkdir "$tmp/repo"
 cp -a "$root/scripts" "$root"/*.yml "$tmp/repo/"
@@ -24,7 +25,7 @@ generate() {
 import json, sys
 print("[project]\ndependencies =", json.dumps(sys.argv[1:]))
 ' "$@" > pyproject.toml
-  PIP_GENERATOR_PYTHON=${PIP_GENERATOR_PYTHON:-python3} PREFER_WHEELS='' \
+  PIP_GENERATOR_PYTHON=$python PREFER_WHEELS='' \
     bash scripts/generate-python-deps.sh > "$tmp/log" 2>&1 \
     || { cat "$tmp/log" >&2; exit 1; }
   python3 -c '
@@ -38,6 +39,18 @@ for module in data.get("modules", [data]):
 # packaging is in the SDK, but not in the Platform.
 modules=$(generate 'packaging==26.0' 'tomli==2.2.1; python_version < "3.11"')
 [[ "$modules" == 'python3-packaging 1' ]] || { echo "FAIL: got $modules" >&2; exit 1; }
+
+# A cached generator venv from another interpreter is rebuilt, so pip resolves
+# the dependencies for the interpreter that runs now.
+venv=.cache/pip-generator-$(basename "$python")
+rm -rf "$venv"
+mkdir -p "$venv/bin"
+printf '#!/bin/sh\necho 2.7.18\n' > "$venv/bin/python"
+chmod +x "$venv/bin/python"
+modules=$(generate 'packaging==26.0')
+[[ "$modules" == 'python3-packaging 1' ]] || { echo "FAIL: got $modules" >&2; exit 1; }
+[[ "$("$venv/bin/python" -c 'import platform; print(platform.python_version())')" != 2.7.18 ]] \
+  || { echo 'FAIL: the generator venv from another interpreter was reused' >&2; exit 1; }
 
 # An aarch64-only package for an aarch64-only app, generated on any machine.
 echo '{"only-arches": ["aarch64"]}' > flathub.json

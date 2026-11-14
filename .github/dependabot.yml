@@ -1,3 +1,5 @@
+# Python wheels are pinned in python3-requirements.json, which Dependabot
+# can't regenerate; see "Python dependencies" in docs/development.md.
 version: 2
 updates:
   - package-ecosystem: github-actions

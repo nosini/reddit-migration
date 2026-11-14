@@ -30,6 +30,18 @@ class FilterRequirementsTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(kept, lines)
 
+    def test_hash_fragments_are_kept(self):
+        url = "pkg @ https://host/pkg-1.0.tar.gz#sha256=0123"
+        result, kept = self.run_filter([
+            f'{url} ; python_version >= "3.11"',
+            "other==1.0  # pinned by hand",
+        ])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(kept, [
+            "pkg@ https://host/pkg-1.0.tar.gz#sha256=0123",
+            "other==1.0  # pinned by hand",
+        ])
+
     def test_python_version_markers_use_the_runtime(self):
         result, kept = self.run_filter([
             'tomli==2.2.1; python_version < "3.11"',

@@ -57,7 +57,10 @@ def main():
     arches = target_arches(sys.argv[4] if len(sys.argv) == 5 else None)
     kept = []
     for line in open(source):
-        text = line.split("#", 1)[0].strip()
+        # pip only treats `#` as a comment at the start of a line or after
+        # whitespace; elsewhere it is part of the requirement, such as the hash
+        # fragment of a direct URL.
+        text = re.sub(r"(^|\s)#.*", "", line).strip()
         if text and not text.startswith("-"):
             requirement = Requirement(text)
             marker = requirement.marker

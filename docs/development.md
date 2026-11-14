@@ -118,9 +118,9 @@ flatpak run --log-session-bus eu.nosini.RedditMigration 2>&1 | grep '(required 1
 
 `.github/workflows/flatpak.yml` runs when a `v*` version tag is pushed,
 for pull requests and on manual runs. Release builds check out the tagged
-commit. Pushes to `main` run the lightweight checks without building the
-Flatpak. For each architecture, the packaging workflow lints the manifest
-and metainfo, builds with
+commit. Pushes to `main` run the lightweight checks and the app's unit tests
+without building the Flatpak. For each architecture, the packaging workflow
+lints the manifest and metainfo, builds with
 [flatpak-github-actions](https://github.com/flatpak/flatpak-github-actions),
 lints the exported build, runs the installed-app checks and the unit tests,
 and uploads an installable bundle as an artifact. Install a downloaded
@@ -130,50 +130,55 @@ Bundles are unsigned and don't update; the published repository does.
 CI builds for x86_64 and aarch64, like Flathub. The aarch64 build uses
 GitHub's Arm runners, which are free for public repositories only.
 
-`.github/workflows/checks.yml` lints the scripts and workflows, checks that
-the manifest and metadata files parse, and runs the tests in
-`scripts/tests/`, including release tag classification and release creation
-with a fake GitHub CLI. The publishing test makes small fake builds and
-publishes them several times to a local web server.
+`.github/workflows/checks.yml` lints the scripts (including the menu
+launcher) and workflows, checks that the manifest and metadata files parse,
+and runs the tests in `scripts/tests/`, including release tag classification
+and release creation with a fake GitHub CLI. The publishing test makes small
+fake builds and publishes them several times to a local web server.
 
 ### Build cache
 
-CI restores `.flatpak-builder`, including downloaded sources and completed
-module results. Flatpak checks the inputs and rebuilds affected modules when
-sources, dependencies, patches or the SDK change. Lint, installed-app checks
-and unit tests still run on every build. The cache is saved only after they
-pass.
+CI restores `.flatpak-builder`, so the downloaded sources and the generated
+Python dependency modules are reused. Flatpak checks their inputs and rebuilds
+a module when its sources, dependencies or the SDK change. The app module is
+a `type: dir` source, which flatpak-builder never caches, so it and the
+modules after it are always built, as are the lint, installed-app checks and
+unit tests.
 
-Each run saves a fresh snapshot, separated by app ID, architecture, Flatpak
-branch and build workflow version, which includes the CI container image.
-The next run restores the newest compatible snapshot. To start a new cache
-namespace, bump `flatpak-v1` in both the key and restore prefix in the
-workflow. Cache misses build normally.
+The key covers this workflow and `python3-requirements.json`, so changing
+either starts a new snapshot; otherwise the newest earlier snapshot is
+restored. The container image is pinned by digest, so a new image means a
+workflow change and a new key. Downloads are carried over and not pruned when a
+dependency is dropped, so a snapshot grows slowly. To start over, bump
+`CACHE_PREFIX` in the workflow; the key and the restore prefix both use it,
+so they can't drift apart. Cache misses build normally.
 
-GitHub lets tags and pull requests restore the default branch's cache,
-but caches from one tag cannot be restored by another tag. To populate a
-shared cache without publishing or creating a release, run the workflow on
-`main` with **cache_only** selected, or run this from the checkout:
+Snapshots are saved only on `main`, and only after the tests and the artifact
+upload, because a snapshot saved on a tag or pull request can only be restored
+by reruns of that ref. GitHub removes caches unused for more than seven days
+and evicts older entries when the repository's storage limit is reached; see
+its [cache access and retention rules](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching).
+
+To populate the cache before a release without publishing, run the workflow
+on `main` without the **publish** input, or run this from the checkout:
 
 ```sh
-gh workflow run flatpak.yml --ref main -f cache_only=true
+gh workflow run flatpak.yml --ref main
 ```
-
-Refresh it before releases when needed. GitHub removes caches unused for
-more than seven days and evicts older entries when the repository's storage
-limit is reached; see its [cache access and retention rules](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching).
 
 ### Publishing
 
-When the repository variable `PUBLISH_FLATPAK` is `true`, pushing a stable
-version tag publishes a signed Flatpak repository to GitHub Pages. Manual
-builds on `main` without **cache_only** also publish. Pull requests and
-prerelease tags only build and test bundles. After a tag build passes, the
-workflow creates its GitHub Release with the runner's `GITHUB_TOKEN` and
-attaches the tested bundles for every architecture. When stable publication
-is enabled, the release
-waits for the signed repository's validation and Pages deployment to
-succeed. Reruns replace assets on an existing release.
+With the repository variable `PUBLISH_FLATPAK` set to `true`, pushing a
+stable version tag publishes a signed Flatpak repository to GitHub Pages.
+Manual runs build and test only unless the **publish** input is selected;
+they can publish from `main`. Pull requests and prerelease tags never
+publish. Runs that can publish wait for one another, so a tag pushed during
+another publication isn't built from an outdated repository head. After a tag
+build passes, the workflow creates its GitHub Release with the runner's
+`GITHUB_TOKEN` and attaches the tested bundles for every architecture. When
+stable publication is enabled, the release waits for the signed repository's
+validation and Pages deployment to succeed. Reruns replace assets on an
+existing release.
 
 A separate job, which never runs the build, downloads the published
 repository and checks it against the signing key. It adds the tested builds of all
@@ -182,7 +187,8 @@ software catalog and summary, and writes `reddit-migration.flatpakrepo` and
 `reddit-migration.flatpakref` with the public key embedded. Both files take
 the app's summary from its metainfo and point to a copy of its icon, which
 software centers show when the remote or app is added. Before deploying, a
-fresh remote that only knows the public key must accept the result.
+fresh remote that only knows the public key must accept the summary, every
+app and extension commit, and each architecture's software catalog.
 
 The catalog refs are deleted before signing because `flatpak
 build-update-repo` reuses unchanged catalog commits, including the unsigned
@@ -190,7 +196,10 @@ ones from the test repositories, without signing them.
 
 The repository keeps the five previous versions of the app, so users can go
 back to one with `flatpak update --commit`. A build whose files didn't
-change adds no version. Static deltas let Flatpak download an install or
+change adds no version. A build older than the published one, such as a rerun
+of an earlier tag or a packaging revision before the current version, is
+refused, because it would become the head and downgrade users on their next
+update. Static deltas let Flatpak download an install or
 update as a few large files instead of one request per file. They add about
 a third to the repository's size, and each kept version adds only the files
 that changed. If the published repository can't be downloaded or doesn't
@@ -199,8 +208,8 @@ Set the variable `FLATPAK_KEEP_HISTORY` to `false` to publish a new
 repository without the earlier versions.
 
 The repository URL defaults to `https://OWNER.github.io/REPOSITORY/`. For a
-custom domain, set the `FLATPAK_REPO_URL` variable to the real URL,
-including the trailing slash.
+custom domain, set the `FLATPAK_REPO_URL` variable to the real URL. The
+trailing slash is optional.
 
 To set publishing up:
 
@@ -210,7 +219,7 @@ To set publishing up:
 3. Set the variable:
    `gh variable set PUBLISH_FLATPAK --body true --repo nosini/reddit-migration`.
 4. Push a version tag pointing to the commit to build, or run the Flatpak
-   workflow manually on `main`.
+   workflow manually on `main` with **publish** selected.
 
 Stable tags have the form `v1.0.1`. A numeric suffix such as `v1.0.1-1`
 identifies a stable packaging revision of the same app version. Other
@@ -341,15 +350,39 @@ interpreter of the runtime's Python version, for example
 `PIP_GENERATOR_PYTHON=python3.14`. Then pip runs there, and prebuilt wheels
 aren't available, so `PREFER_WHEELS` must be empty.
 
+The generated file pins exact wheels, so it changes only when the script
+runs. Dependabot tracks the GitHub Actions but not these entries, and the
+ranges in `pyproject.toml` stay valid across patch and minor releases. To
+pick up upstream releases, including security fixes, rerun the script before
+a release and commit the changed `python3-requirements.json`; nothing in CI
+regenerates it.
+
 ## Releases
 
 Bump `version` in `pyproject.toml` and `__version__` in
 `reddit_migration/__init__.py`, and add a `<release>` entry to the metainfo
-file, newest first. The installed-app checks fail when the version the app
-reports isn't the newest release in the metainfo.
+file, newest first. The workflow fails a stable tag whose version, without a
+numeric packaging suffix, isn't the newest metainfo release, and a test checks
+that `pyproject.toml`, `__version__` and the metainfo agree. The
+installed-app checks fail when the version the app reports isn't the newest
+release in the metainfo.
 
 ## Moving to a newer runtime
 
-Change `runtime-version` in the manifest and the image tag in
-`.github/workflows/flatpak.yml`. If the new runtime has a different Python
-version, regenerate the Python dependencies.
+Change `runtime-version` in the manifest. The container image tag
+`freedesktop-VERSION` appears twice in `.github/workflows/flatpak.yml`, in
+the `build` and `publish` jobs, and again in the `publishing` job of
+`.github/workflows/checks.yml`; keep all three in step with the manifest.
+Each is pinned by digest (`freedesktop-VERSION@sha256:...`), because the
+publish job imports the signing key inside it and the tag can be moved.
+Dependabot doesn't update these, so look up the new tag's digest, for
+example with `skopeo inspect --format '{{.Digest}}'
+docker://ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-VERSION`,
+and refresh it the same way to pick up a rebuilt image. The actions are
+pinned by commit, which Dependabot keeps updated, and the actionlint download
+in `checks.yml` by checksum; update its version and checksum by hand.
+`checks.yml` also pins the runtimes' Python in `python-version`, for the app
+tests and the script tests; change both when the runtime's Python version
+changes. If the new runtime has a different Python version, regenerate the
+Python dependencies, and update the version examples in this file and in
+`scripts/generate-python-deps.sh`.

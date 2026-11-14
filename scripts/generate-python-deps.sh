@@ -18,18 +18,26 @@ sdk=$(sed -n 's/^sdk: *//p' "$manifest")
 version=$(sed -n 's/^runtime-version: *//p' "$manifest" | tr -d "'\"")
 
 python=${PIP_GENERATOR_PYTHON:-python3}
+version_probe='import platform; print(platform.python_version())'
+python_version=$("$python" -c "$version_probe")
+# pip in the venv resolves dependencies, markers and wheel tags for the
+# interpreter that created it, so rebuild the venv when that changes, for
+# example when `python3` starts pointing at a newer version.
 venv=.cache/pip-generator-$(basename "$python")
+if [[ -x "$venv/bin/python" ]] && \
+   [[ "$("$venv/bin/python" -c "$version_probe")" != "$python_version" ]]; then
+  rm -rf "$venv"
+fi
 if [[ ! -x "$venv/bin/python" ]]; then
   "$python" -m venv "$venv"
 fi
 "$venv/bin/pip" install -q --disable-pip-version-check 'requirements-parser>=0.11,<1' 'packaging>=23'
 
-version_probe='import platform; print(platform.python_version())'
 args=(--requirements-file=.cache/requirements.txt --output=python3-requirements)
 if [[ -n "${PIP_GENERATOR_PYTHON:-}" ]]; then
   # The generator runs pip3 from PATH.
   PATH="$PWD/$venv/bin:$PATH"
-  runtime_python=$("$python" -c "$version_probe")
+  runtime_python=$python_version
 else
   args+=(--runtime="$sdk//$version")
   runtime_python=$(flatpak run --command=python3 "$sdk//$version" -c "$version_probe")
