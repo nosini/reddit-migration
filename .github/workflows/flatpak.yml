@@ -337,6 +337,26 @@ jobs:
       - id: deployment
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5
 
+  # The shared remote collects packages only after Pages serves the signed repo.
+  # A separate token is needed because GITHUB_TOKEN cannot dispatch another repo.
+  announce:
+    needs: deploy
+    runs-on: ubuntu-24.04
+    permissions: {}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Announce the publication to the shared remote
+        env:
+          GH_TOKEN: ${{ secrets.FLATPAK_REPO_DISPATCH_TOKEN }}
+        run: |
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo '::error::Set FLATPAK_REPO_DISPATCH_TOKEN with Contents: write access to nosini/flatpak-repo to notify the shared remote.'
+            exit 1
+          fi
+          gh api --method POST repos/nosini/flatpak-repo/dispatches -f event_type=app-published
+
   # Wait for the tested builds and any required stable publication before
   # creating the release. The runner authenticates with GITHUB_TOKEN.
   release:

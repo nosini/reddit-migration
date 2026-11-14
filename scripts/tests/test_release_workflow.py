@@ -305,6 +305,43 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("has no app or runtime refs", script)
         self.assertIn("appstream2/$arch", script)
 
+    def test_announcement_waits_for_deployment_and_uses_separate_credentials(self):
+        job = WORKFLOW["jobs"]["announce"]
+        self.assertEqual(job["needs"], "deploy")
+        self.assertNotIn("if", job)  # Default success() skips failed/skipped deployment.
+        self.assertEqual(job["permissions"], {})
+        self.assertEqual(len(job["steps"]), 1)
+        step = job["steps"][0]
+        self.assertEqual(step["env"]["GH_TOKEN"], "${{ secrets.FLATPAK_REPO_DISPATCH_TOKEN }}")
+        self.assertNotIn("uses", step)  # No checkout or build with the dispatch token.
+
+    def test_announcement_dispatches_once_and_reports_missing_or_rejected_credentials(self):
+        binary = self.directory / "gh"
+        binary.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json, os, sys\n"
+            "with open(os.environ['GH_LOG'], 'a') as log:\n"
+            "    log.write(json.dumps(sys.argv[1:]) + '\\n')\n"
+            "sys.exit(int(os.environ.get('GH_EXIT', '0')))\n"
+        )
+        binary.chmod(0o755)
+        log = self.directory / "gh.jsonl"
+        env = dict(PATH=f"{self.directory}:{os.environ['PATH']}", GH_LOG=str(log))
+        step = "Announce the publication to the shared remote"
+        missing = self.run_step("announce", step, GH_TOKEN="", **env)
+        self.assertNotEqual(missing.returncode, 0)
+        self.assertIn("::error::Set FLATPAK_REPO_DISPATCH_TOKEN", missing.stdout)
+        self.assertFalse(log.exists())
+        for status in (0, 1):
+            result = self.run_step("announce", step, GH_TOKEN="fixture-token",
+                                   GH_EXIT=str(status), **env)
+            self.assertEqual(result.returncode, status)
+            self.assertNotIn("fixture-token", result.stdout + result.stderr)
+        commands = [json.loads(line) for line in log.read_text().splitlines()]
+        self.assertEqual(commands, [["api", "--method", "POST",
+                                     "repos/nosini/flatpak-repo/dispatches",
+                                     "-f", "event_type=app-published"]] * 2)
+
 
 class AppVersionTests(unittest.TestCase):
     def test_project_metadata_and_metainfo_versions_agree(self):
