@@ -265,6 +265,12 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertNotIn("restore-cache", builder["with"])
         self.assertNotIn("save-cache", builder["with"])
 
+    def test_runtimes_are_made_updatable_before_the_build(self):
+        names = [step.get("name") or step.get("uses", "")
+                 for step in WORKFLOW["jobs"]["build"]["steps"]]
+        builder = next(i for i, name in enumerate(names) if "/flatpak-builder@" in name)
+        self.assertLess(names.index("Make the preinstalled runtimes updatable"), builder)
+
     def test_cache_is_saved_after_the_tested_repository_is_uploaded(self):
         steps = WORKFLOW["jobs"]["build"]["steps"]
         names = [step["name"] for step in steps if step.get("name")]

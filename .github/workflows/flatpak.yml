@@ -142,6 +142,20 @@ jobs:
             manifest "$APP_ID.yml"
           flatpak-builder-lint --gha-format appstream "$APP_ID.metainfo.xml"
 
+      # The image ships its runtimes in read-only layers, and overlayfs refuses
+      # the directory renames flatpak makes when flatpak-builder updates them
+      # ("Invalid cross-device link", then a crash). Once Flathub has a newer
+      # SDK than the image, every build would fail. Copying the installations
+      # into the container's writable layer makes them updatable.
+      # https://github.com/flatpak/flatpak-github-actions/issues/267
+      - name: Make the preinstalled runtimes updatable
+        run: |
+          for dir in $(flatpak --installations); do
+            cp -a "$dir" "$dir.copy"
+            rm -rf "$dir"
+            mv "$dir.copy" "$dir"
+          done
+
       # The key covers this workflow and the pinned wheels, so changing either
       # starts a new snapshot; the container image is pinned by digest, so a
       # new image changes the workflow too. Downloads and the generated Python
