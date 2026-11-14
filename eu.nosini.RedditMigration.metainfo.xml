@@ -38,6 +38,18 @@
   </categories>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.1.0" date="2026-11-14">
+      <description>
+        <ul>
+          <li>The menu entry now starts a dry run; the real migration is a separate action</li>
+          <li>Items are saved on the second account in their original order</li>
+          <li>Source links are found in all comments, including in URLs with parentheses, ports or Markdown escapes</li>
+          <li>A failed comment fetch leaves the item saved instead of moving it</li>
+          <li>Invalid config values, state files and options are reported clearly</li>
+          <li>Login checks the keyring first, ignores unrelated requests, times out and refuses the same account twice</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.1" date="2026-09-21">
       <description>
         <ul>
