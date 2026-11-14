@@ -26,8 +26,19 @@ def _collection():
     conn = secretstorage.dbus_init()
     collection = secretstorage.get_default_collection(conn)
     if collection.is_locked():
-        collection.unlock()
+        # unlock() returns True when the prompt was dismissed, False on success.
+        if collection.unlock():
+            raise RuntimeError("the keyring is locked and the unlock prompt was dismissed")
     return collection
+
+
+def keyring_available() -> bool:
+    """True if the default keyring can be reached and is unlocked."""
+    try:
+        collection = _collection()
+    except Exception:
+        return False
+    return not collection.is_locked()
 
 
 def keyring_get(key: str) -> str | None:
@@ -55,22 +66,18 @@ def keyring_store(key: str, value: str, label: str) -> None:
 def load_secrets_into_env(app: str = KEYRING_APP) -> None:
     """Populate REDDIT_* env vars from the keyring if not already set.
 
-    Uses setdefault, so a real environment variable always wins. Silently
+    Only the known REDDIT_* keys are read, and a non-empty environment
+    variable always wins. Silently
     no-ops if secretstorage is missing or the keyring can't be reached, so
     plain env vars still work as a fallback.
     """
     try:
-        import secretstorage
-    except ImportError:
-        return
-    try:
-        conn = secretstorage.dbus_init()
-        collection = secretstorage.get_default_collection(conn)
-        if collection.is_locked():
-            collection.unlock()
+        collection = _collection()
         for item in collection.search_items({"application": app}):
             key = item.get_attributes().get("key")
-            if key:
-                os.environ.setdefault(key, item.get_secret().decode())
+            if key in SECRET_KEYS and not os.environ.get(key):
+                os.environ[key] = item.get_secret().decode()
+    except ImportError:
+        return
     except Exception as exc:
         print(f"[warn] keyring load skipped: {exc}", file=sys.stderr)

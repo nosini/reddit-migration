@@ -59,8 +59,9 @@ Tokens, config and state are kept, since they live in GNOME Keyring and
 pipx install git+https://github.com/nosini/reddit-migration.git
 ```
 
-SecretStorage pulls in `jeepney` + `cryptography`, both pure-wheel installs, so
-it works inside the isolated pipx venv without system dbus-python.
+SecretStorage pulls in `jeepney` + `cryptography`, both installed from
+prebuilt wheels, so it works inside the isolated pipx venv without system
+dbus-python.
 
 ## One-time Reddit setup
 
@@ -85,6 +86,12 @@ Migration continues after individual item failures and reports migrated, skipped
 and failed counts. The command exits with status 1 if any item fails (including
 during a dry run), or 0 when all items succeed or are skipped.
 
+Reddit's saved listing returns at most about 1,000 items, and items skipped by
+`--skip`, `--only` or `--skip-comments` stay saved on account 1 and keep their
+place. If about 1,000 skipped items sit at the top, older saved items are not
+seen; the summary says when the listing came back full. Migrate or unsave those
+items on Reddit to reach the older ones.
+
 `--login` prompts for the client_id and user agent (only the first time — after
 that they come from the keyring), and for the OAuth **redirect port** (default
 8080; pass `--port` to skip the prompt). The port only has to match your Reddit
@@ -102,8 +109,8 @@ alias reddit_migration='flatpak run eu.nosini.RedditMigration'
 ```
 
 The Flatpak also adds a **Reddit Migration** entry to the application menu.
-The entry runs the migration in a terminal, and its right-click actions start
-a dry run or `--login`. The terminal stays open after the run until you press
+The entry runs a dry run in a terminal; its right-click actions start the real
+migration or `--login`. The terminal stays open after the run until you press
 Enter.
 
 The Flatpak shares tokens, config and state with a pipx install: they live in

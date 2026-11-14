@@ -52,8 +52,9 @@ skip_comments = {skip_comments}
 # External source domains. A saved post/comment that links to one of these
 # domains (or a subdomain of it) is recorded in the local JSON vault instead
 # of being re-saved on account 2.
-# Setting this key REPLACES the built-in defaults; omit it to keep them.
-domains = {domains}
+# Setting this key REPLACES the built-in defaults; leave it commented out to
+# keep them (and pick up domains added in newer versions).
+{domains}
 
 [state]
 # Where the external-source vault (the JSON file of migrated sources) is
@@ -93,6 +94,8 @@ class Config:
     source_domains: set = field(default_factory=lambda: set(DEFAULT_SOURCE_DOMAINS))
     skip_comments: bool = False
     state_file: str = ""
+    # The folder of the config file, used to resolve a relative [state].file.
+    _state_file_base: Optional[Path] = field(default=None, repr=False, compare=False)
 
 
 def _toml_str_list(values) -> str:
@@ -101,11 +104,17 @@ def _toml_str_list(values) -> str:
 
 
 def render_config(cfg: Config) -> str:
+    domains = _toml_str_list(cfg.source_domains)
+    if cfg.source_domains == set(DEFAULT_SOURCE_DOMAINS):
+        # Keep the key commented out so a later release can extend the defaults.
+        domains = "# domains = " + domains
+    else:
+        domains = "domains = " + domains
     return CONFIG_TEMPLATE_FMT.format(
         only=_toml_str_list(cfg.only),
         skip=_toml_str_list(cfg.skip),
         skip_comments="true" if cfg.skip_comments else "false",
-        domains=_toml_str_list(cfg.source_domains),
+        domains=domains,
         state_file=json.dumps(cfg.state_file),
     )
 
@@ -116,13 +125,59 @@ def _as_set(value) -> set:
     return {str(v).strip().lower() for v in value if str(v).strip()}
 
 
+def _error(path: Path, key: str, message: str) -> SystemExit:
+    return SystemExit(f"Invalid config {path}: {key} {message}")
+
+
+def _table(data: dict, section: str, path: Path) -> dict:
+    value = data.get(section)
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise _error(path, section, "must be a table")
+    return value
+
+
+def _reject_unknown(data: dict, section: Optional[str], allowed: set, path: Path) -> None:
+    for key in sorted(set(data) - allowed):
+        name = f"{section}.{key}" if section else key
+        raise _error(path, name, "is not a known option")
+
+
+def _string_list(value, path: Path, key: str) -> Optional[list]:
+    if value is None:
+        return None
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise _error(path, key, "must be a list of strings")
+    return value
+
+
+def _boolean(value, path: Path, key: str) -> bool:
+    if value is None:
+        return False
+    if not isinstance(value, bool):
+        raise _error(path, key, "must be true or false")
+    return value
+
+
+def _string(value, path: Path, key: str) -> str:
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise _error(path, key, "must be a string")
+    return value
+
+
 def _load_toml(path: Path) -> dict:
     try:
         import tomllib  # Python 3.11+
     except ModuleNotFoundError:  # Python 3.9 / 3.10
         import tomli as tomllib
-    with path.open("rb") as f:
-        return tomllib.load(f)
+    try:
+        with path.open("rb") as f:
+            return tomllib.load(f)
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        raise SystemExit(f"Could not read config {path}: {exc}")
 
 
 def load_config(explicit: Optional[str] = None) -> Config:
@@ -134,21 +189,26 @@ def load_config(explicit: Optional[str] = None) -> Config:
         return cfg
 
     data = _load_toml(path)
+    _reject_unknown(data, None, {"subreddits", "items", "sources", "state"}, path)
 
-    subs = data.get("subreddits", {})
-    cfg.only = _as_set(subs.get("only"))
-    cfg.skip = _as_set(subs.get("skip"))
+    subs = _table(data, "subreddits", path)
+    _reject_unknown(subs, "subreddits", {"only", "skip"}, path)
+    cfg.only = _as_set(_string_list(subs.get("only"), path, "subreddits.only"))
+    cfg.skip = _as_set(_string_list(subs.get("skip"), path, "subreddits.skip"))
 
-    items = data.get("items", {})
-    cfg.skip_comments = bool(items.get("skip_comments", False))
+    items = _table(data, "items", path)
+    _reject_unknown(items, "items", {"skip_comments"}, path)
+    cfg.skip_comments = _boolean(items.get("skip_comments"), path, "items.skip_comments")
 
-    sources = data.get("sources", {})
-    domains = sources.get("domains")
-    if domains is not None:  # present (even if empty) -> replace defaults
-        cfg.source_domains = _as_set(domains)
+    sources = _table(data, "sources", path)
+    _reject_unknown(sources, "sources", {"domains"}, path)
+    if "domains" in sources:  # present (even if empty) -> replace defaults
+        cfg.source_domains = _as_set(_string_list(sources["domains"], path, "sources.domains"))
 
-    state = data.get("state", {})
-    cfg.state_file = str(state.get("file", "") or "")
+    state = _table(data, "state", path)
+    _reject_unknown(state, "state", {"file"}, path)
+    cfg.state_file = _string(state.get("file"), path, "state.file")
+    cfg._state_file_base = path.parent
 
     return cfg
 
@@ -159,11 +219,20 @@ def resolve_state_path(cfg: Config) -> Path:
     else a legacy migrated_sources.json in the current directory if one
     exists, else $XDG_CONFIG_HOME/reddit_migration/migrated_sources.json."""
     if cfg.state_file:
-        return Path(cfg.state_file).expanduser()
+        path = Path(cfg.state_file).expanduser()
+        if not path.is_absolute() and cfg._state_file_base is not None:
+            path = cfg._state_file_base / path
+        return path
     legacy = Path(DEFAULT_STATE_FILENAME)
     if legacy.exists():
         return legacy
     return _config_home() / "reddit_migration" / DEFAULT_STATE_FILENAME
+
+
+def _write_config(path: Path, text: str) -> None:
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    tmp.replace(path)
 
 
 def write_default_config(explicit: Optional[str] = None) -> Path:
@@ -171,7 +240,7 @@ def write_default_config(explicit: Optional[str] = None) -> Path:
     if path.exists():
         raise SystemExit(f"Config already exists, not overwriting: {path}")
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(render_config(Config()), encoding="utf-8")
+    _write_config(path, render_config(Config()))
     return path
 
 
@@ -183,5 +252,5 @@ def update_config(explicit: Optional[str] = None) -> Path:
     path = config_path(explicit)
     cfg = load_config(explicit) if path.exists() else Config()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(render_config(cfg), encoding="utf-8")
+    _write_config(path, render_config(cfg))
     return path

@@ -13,6 +13,13 @@ class ConfigTests(unittest.TestCase):
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
+        # Keep the legacy ./migrated_sources.json check independent of where
+        # the tests are run from.
+        self.cwd = Path.cwd()
+        working = tempfile.TemporaryDirectory()
+        self.addCleanup(working.cleanup)
+        os.chdir(working.name)
+        self.addCleanup(os.chdir, self.cwd)
         self.path = Path(directory.name) / "custom.toml"
         env = patch.dict(os.environ, {"XDG_CONFIG_HOME": directory.name}, clear=True)
         env.start()
@@ -49,6 +56,62 @@ class ConfigTests(unittest.TestCase):
         self.path.write_text('[subreddits]\nonly = ["pics"]\n', encoding="utf-8")
         update_config(str(self.path))
         self.assertEqual(load_config(str(self.path)).only, {"pics"})
+
+    def test_update_preserves_custom_domains(self):
+        self.path.write_text('[sources]\ndomains = ["example.org"]\n', encoding="utf-8")
+        update_config(str(self.path))
+        self.assertEqual(load_config(str(self.path)).source_domains, {"example.org"})
+        self.assertIn('domains = ["example.org"]', self.path.read_text(encoding="utf-8"))
+
+    def test_default_config_keeps_domains_unpinned(self):
+        text = config.render_config(Config())
+        self.assertIn("# domains = ", text)
+        self.assertNotIn("\ndomains = ", text)
+
+    def test_string_instead_of_list_is_rejected(self):
+        self.path.write_text('[subreddits]\nonly = "pics"\n', encoding="utf-8")
+        with self.assertRaises(SystemExit) as caught:
+            load_config(str(self.path))
+        message = str(caught.exception)
+        self.assertIn(str(self.path), message)
+        self.assertIn("subreddits.only", message)
+        self.assertIn("list of strings", message)
+
+    def test_string_instead_of_domain_list_is_rejected(self):
+        self.path.write_text('[sources]\ndomains = "pixiv.net"\n', encoding="utf-8")
+        with self.assertRaises(SystemExit) as caught:
+            load_config(str(self.path))
+        self.assertIn("sources.domains", str(caught.exception))
+
+    def test_string_instead_of_boolean_is_rejected(self):
+        self.path.write_text('[items]\nskip_comments = "false"\n', encoding="utf-8")
+        with self.assertRaises(SystemExit) as caught:
+            load_config(str(self.path))
+        self.assertIn("items.skip_comments", str(caught.exception))
+
+    def test_scalar_instead_of_table_is_rejected(self):
+        self.path.write_text("subreddits = 1\n", encoding="utf-8")
+        with self.assertRaises(SystemExit) as caught:
+            load_config(str(self.path))
+        self.assertIn("subreddits", str(caught.exception))
+        self.assertIn("table", str(caught.exception))
+
+    def test_unknown_key_is_rejected(self):
+        self.path.write_text('[items]\nskip_comment = true\n', encoding="utf-8")
+        with self.assertRaises(SystemExit) as caught:
+            load_config(str(self.path))
+        self.assertIn("items.skip_comment", str(caught.exception))
+
+    def test_toml_syntax_error_names_the_file(self):
+        self.path.write_text('[subreddits\nonly = ["pics"]\n', encoding="utf-8")
+        with self.assertRaises(SystemExit) as caught:
+            load_config(str(self.path))
+        self.assertIn(str(self.path), str(caught.exception))
+
+    def test_relative_state_file_is_resolved_against_the_config_folder(self):
+        self.path.write_text('[state]\nfile = "vault.json"\n', encoding="utf-8")
+        cfg = load_config(str(self.path))
+        self.assertEqual(resolve_state_path(cfg), self.path.parent / "vault.json")
 
     def test_default_paths_use_xdg_config_home(self):
         folder = Path(os.environ["XDG_CONFIG_HOME"]) / "reddit_migration"

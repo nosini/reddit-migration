@@ -3,8 +3,9 @@
 What it does:
 - Reads the saved list from account 1.
 - Extracts a source URL from the post body, linked URL, or comments.
-- If the source domain is Pixiv, Danbooru, or Gelbooru, it stores that external
-  source in a local JSON vault and unsaves the Reddit item from account 1.
+- If the source domain is one of the configured source domains, it stores that
+  external source in a local JSON vault and unsaves the Reddit item from
+  account 1.
 - Otherwise, it saves the Reddit submission/comment on account 2 and unsaves it
   from account 1.
 
@@ -16,6 +17,7 @@ kept in the local JSON vault instead.
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 import time
@@ -27,6 +29,7 @@ from urllib.parse import urlparse
 import praw
 from praw.models import Comment, Submission
 
+from . import DEFAULT_USER_AGENT
 from .config import load_config, resolve_state_path
 from .secrets_store import load_secrets_into_env
 
@@ -45,7 +48,15 @@ ONLY_SUBREDDITS = set()
 # Source domains are configured, not hardcoded — see config.py (DEFAULT_SOURCE_DOMAINS),
 # the [sources].domains config key, and the --source-domain flag.
 
-URL_RE = re.compile(r"https?://[^\s<>()\[\]{}\"']+", re.IGNORECASE)
+URL_RE = re.compile(r"https?://[^\s<>\[\]{}\"']+", re.IGNORECASE)
+
+# Reddit Markdown escapes punctuation in URLs, e.g. foo\_bar\_(artist).
+MARKDOWN_ESCAPE_RE = re.compile(r"""\\([!"#$%&'()*+,\-./:;<=>?@\[\]\\^_`{|}~])""")
+TRAILING_URL_PUNCTUATION = '.,;"\''
+CLOSING_BRACKETS = {")": "(", "]": "[", "}": "{", ">": "<"}
+
+# Reddit returns at most about this many items in a saved listing.
+REDDIT_SAVED_LIMIT = 1000
 
 
 @dataclass
@@ -59,10 +70,8 @@ class MigratedSource:
 
 
 def build_reddit_from_refresh_token(refresh_token: str) -> praw.Reddit:
-    import os
-
     client_id = os.environ["REDDIT_CLIENT_ID"]
-    user_agent = os.environ.get("REDDIT_USER_AGENT", "saved-migrator/1.0")
+    user_agent = os.environ.get("REDDIT_USER_AGENT", DEFAULT_USER_AGENT)
 
     return praw.Reddit(
         client_id=client_id,
@@ -73,11 +82,31 @@ def build_reddit_from_refresh_token(refresh_token: str) -> praw.Reddit:
 
 
 def domain_of(url: str) -> str:
-    return (urlparse(url).netloc or "").lower()
+    return (urlparse(url).hostname or "").lower()
+
+
+def normalize_domain(value: str) -> str:
+    """Turn a configured domain (with or without scheme, port or path) into a hostname."""
+    value = (value or "").strip().lower()
+    if not value:
+        return ""
+    parsed = urlparse(value if "://" in value else "//" + value)
+    return (parsed.hostname or "").rstrip(".")
 
 
 def normalize_url(url: str) -> str:
-    return url.rstrip('.,);]}>"\'')
+    url = MARKDOWN_ESCAPE_RE.sub(r"\1", url)
+    while url:
+        char = url[-1]
+        if char in TRAILING_URL_PUNCTUATION:
+            url = url[:-1]
+        elif char in CLOSING_BRACKETS and url.count(char) > url.count(CLOSING_BRACKETS[char]):
+            # Drop a bracket that only closes Markdown syntax, but keep one
+            # that balances a bracket inside the URL.
+            url = url[:-1]
+        else:
+            break
+    return url
 
 
 def extract_urls(text: str) -> list[str]:
@@ -88,7 +117,16 @@ def extract_urls(text: str) -> list[str]:
 
 def domain_matches(domain: str, allowed: set) -> bool:
     """True if `domain` equals or is a subdomain of any configured domain."""
-    return any(domain == d or domain.endswith("." + d) for d in allowed)
+    domain = normalize_domain(domain)
+    if not domain:
+        return False
+    for value in allowed:
+        allowed_domain = normalize_domain(value)
+        if allowed_domain and (
+            domain == allowed_domain or domain.endswith("." + allowed_domain)
+        ):
+            return True
+    return False
 
 
 def first_allowed_source_url(urls: Iterable[str], allowed_domains: set) -> Optional[str]:
@@ -100,7 +138,7 @@ def first_allowed_source_url(urls: Iterable[str], allowed_domains: set) -> Optio
 
 def comment_text(comment: Comment) -> str:
     body = getattr(comment, "body", "") or ""
-    title = getattr(comment.submission, "title", "") if getattr(comment, "submission", None) else ""
+    title = getattr(comment, "link_title", "") or ""
     return f"{title}\n{body}"
 
 
@@ -115,18 +153,20 @@ def submission_self_text(submission: Submission) -> str:
 
 
 def submission_comment_text(submission: Submission) -> str:
-    """Bodies of all comments on the post. Fetches the comment tree."""
-    parts = []
-    try:
-        submission.comments.replace_more(limit=0)
-        for comment in submission.comments.list():
-            if isinstance(comment, Comment):
-                body = getattr(comment, "body", "") or ""
-                if body:
-                    parts.append(body)
-    except Exception as exc:
-        print(f"  [warn] comment fetch failed: {exc}", file=sys.stderr)
+    """Bodies of all comments on the post. Fetches the whole comment tree.
 
+    Errors propagate so the item is counted as failed and left saved on
+    account 1; treating a failed fetch as "no source URL" would move it to
+    account 2 by mistake.
+    """
+    parts = []
+    # Expand every "load more" stub, so links in deeper replies are seen too.
+    submission.comments.replace_more(limit=None)
+    for comment in submission.comments.list():
+        if isinstance(comment, Comment):
+            body = getattr(comment, "body", "") or ""
+            if body:
+                parts.append(body)
     return "\n".join(parts)
 
 
@@ -165,16 +205,30 @@ def detect_source_url(item, allowed_domains: set) -> Optional[str]:
 
 
 def load_state(path: Path) -> dict:
-    if path.exists():
-        return json.loads(path.read_text(encoding="utf-8"))
-    return {"migrated_sources": []}
+    if not path.exists():
+        return {"migrated_sources": []}
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise SystemExit(f"Could not read state file {path}: {exc}")
+    if not isinstance(state, dict):
+        raise SystemExit(f"Invalid state file {path}: expected a JSON object")
+    entries = state.get("migrated_sources", [])
+    if not isinstance(entries, list) or not all(isinstance(entry, dict) for entry in entries):
+        raise SystemExit(
+            f"Invalid state file {path}: migrated_sources must be a list of objects"
+        )
+    return state
 
 
 def save_state(path: Path, state: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     # Write to a temp file first then replace, so a crash mid-write doesn't corrupt state.
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
+    with tmp.open("w", encoding="utf-8") as f:
+        f.write(json.dumps(state, indent=2, ensure_ascii=False))
+        f.flush()
+        os.fsync(f.fileno())
     tmp.replace(path)
 
 
@@ -207,6 +261,7 @@ def migrate_one(
     dry_run: bool = False,
     *,
     state_path: Path,
+    recorded_fullnames: Optional[set] = None,
 ) -> tuple[bool, str]:
     """Process one saved item.
 
@@ -232,8 +287,15 @@ def migrate_one(
         # Record only if not already recorded (avoid duplicates), but always
         # perform the unsave so a previous crash between record and unsave
         # self-heals on rerun instead of leaving the item saved forever.
-        if not already_recorded(state, fullname):
+        recorded = (
+            already_recorded(state, fullname)
+            if recorded_fullnames is None
+            else fullname in recorded_fullnames
+        )
+        if not recorded:
             record_external_source(state, item, source_url)
+            if recorded_fullnames is not None:
+                recorded_fullnames.add(fullname)
         if not dry_run:
             # Commit the vault before removing the only saved Reddit reference.
             # Retry persistence even for an entry retained in memory after a failure.
@@ -260,8 +322,6 @@ def _split_csv(value: str) -> set:
 
 
 def run_migrate(args) -> int:
-    import os
-
     # Reject invalid configuration before accessing either Reddit account.
     cfg = load_config(getattr(args, "config", None))
 
@@ -269,13 +329,16 @@ def run_migrate(args) -> int:
     # unless they're already set in the environment.
     load_secrets_into_env()
 
-    if (
-        "REDDIT_ACCOUNT1_REFRESH_TOKEN" not in os.environ
-        or "REDDIT_ACCOUNT2_REFRESH_TOKEN" not in os.environ
-    ):
+    required = (
+        "REDDIT_CLIENT_ID",
+        "REDDIT_ACCOUNT1_REFRESH_TOKEN",
+        "REDDIT_ACCOUNT2_REFRESH_TOKEN",
+    )
+    missing = [key for key in required if not os.environ.get(key)]
+    if missing:
         raise SystemExit(
-            "Missing Reddit refresh tokens. Run `reddit_migration --login` first "
-            "to authorize both accounts."
+            f"Missing Reddit credentials: {', '.join(missing)}. "
+            "Run `reddit_migration --login` first to authorize both accounts."
         )
 
     refresh1 = os.environ["REDDIT_ACCOUNT1_REFRESH_TOKEN"]
@@ -307,19 +370,27 @@ def run_migrate(args) -> int:
     state_path = Path(args.state_file).expanduser() if args.state_file else resolve_state_path(cfg)
     print(f"State file: {state_path}")
     state = load_state(state_path)
+    recorded_fullnames = {
+        entry["reddit_fullname"]
+        for entry in state.get("migrated_sources", [])
+        if isinstance(entry, dict) and entry.get("reddit_fullname")
+    }
 
     # Materialize the whole saved listing before processing. Unsaving items as
     # we go mutates the listing that `after`-fullname pagination anchors on, so
     # a lazy iterator would silently skip items.
     items = list(reddit1.redditor(str(me1)).saved(limit=None))
+    saved_count = len(items)
+    listing_full = saved_count >= REDDIT_SAVED_LIMIT
+    # The listing is newest first. Take the newest --limit items, then process
+    # oldest first so the destination ends up in the same order as the source.
+    if args.limit:
+        items = items[: args.limit]
 
     processed = 0
     skipped = 0
     failed = 0
-    for item in items:
-        if args.limit and processed >= args.limit:
-            break
-
+    for item in reversed(items):
         try:
             migrated, message = migrate_one(
                 item,
@@ -332,6 +403,7 @@ def run_migrate(args) -> int:
                 skip_comments=skip_comments,
                 dry_run=args.dry_run,
                 state_path=state_path,
+                recorded_fullnames=recorded_fullnames,
             )
             print(message)
             if migrated:
@@ -353,6 +425,11 @@ def run_migrate(args) -> int:
         print(
             f"Done. {processed} items migrated, {skipped} skipped, {failed} failed. "
             f"{len(state.get('migrated_sources', []))} external-source entries in {state_path}"
+        )
+    if listing_full:
+        print(
+            f"Note: Reddit returned {saved_count} saved items, its listing maximum. "
+            "Older saved items may not have been seen; skipped items keep their slots."
         )
 
     return 1 if failed else 0

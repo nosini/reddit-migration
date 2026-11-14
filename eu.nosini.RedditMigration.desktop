@@ -1,17 +1,17 @@
 [Desktop Entry]
 Type=Application
 Name=Reddit Migration
-Comment=Move saved Reddit items from one account to another
-Exec=reddit_migration-terminal
+Comment=Preview moving saved Reddit items from one account to another
+Exec=reddit_migration-terminal --dry-run
 Icon=eu.nosini.RedditMigration
 Terminal=true
 Categories=Network;
 Keywords=reddit;saved;migrate;
-Actions=dry-run;login;
+Actions=migrate;login;
 
-[Desktop Action dry-run]
-Name=Dry Run
-Exec=reddit_migration-terminal --dry-run
+[Desktop Action migrate]
+Name=Migrate Saved Items
+Exec=reddit_migration-terminal
 
 [Desktop Action login]
 Name=Log In to Reddit Accounts

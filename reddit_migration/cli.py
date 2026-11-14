@@ -13,6 +13,26 @@ import os
 from . import __version__
 
 
+def _non_negative_float(value: str) -> float:
+    try:
+        number = float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"invalid number: {value!r}")
+    if number < 0:
+        raise argparse.ArgumentTypeError("must not be negative")
+    return number
+
+
+def _non_negative_int(value: str) -> int:
+    try:
+        number = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"invalid integer: {value!r}")
+    if number < 0:
+        raise argparse.ArgumentTypeError("must not be negative")
+    return number
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="reddit_migration",
@@ -43,7 +63,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="OAuth redirect port for --login (must match your Reddit app's redirect URI). Prompts if omitted.",
     )
-    p.add_argument("--limit", type=int, default=0, help="Max saved items to process; 0 means no limit.")
+    p.add_argument(
+        "--limit",
+        type=_non_negative_int,
+        default=0,
+        help="Max saved items to process; 0 means no limit.",
+    )
     p.add_argument(
         "--state-file",
         default=os.environ.get("MIGRATION_STATE_FILE") or None,
@@ -51,7 +76,7 @@ def build_parser() -> argparse.ArgumentParser:
         "else ./migrated_sources.json if it exists, "
         "else ~/.config/reddit_migration/migrated_sources.json.",
     )
-    p.add_argument("--sleep", type=float, default=float(os.environ.get("MIGRATION_SLEEP_SECS", "1.0")))
+    p.add_argument("--sleep", type=_non_negative_float, default=None)
     p.add_argument("--dry-run", action="store_true", help="Do not save/unsave anything; only print actions.")
     p.add_argument(
         "--skip-comments",
@@ -65,7 +90,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv=None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
 
     if args.write_config:
         from .config import write_default_config
@@ -85,6 +111,13 @@ def main(argv=None) -> int:
         from .login import run_login
 
         return run_login(args.port)
+
+    if args.sleep is None:
+        raw_sleep = os.environ.get("MIGRATION_SLEEP_SECS", "1.0")
+        try:
+            args.sleep = _non_negative_float(raw_sleep)
+        except argparse.ArgumentTypeError as exc:
+            parser.error(f"MIGRATION_SLEEP_SECS={raw_sleep!r}: {exc}")
 
     from .migrate import run_migrate
 

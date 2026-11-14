@@ -13,16 +13,19 @@ from __future__ import annotations
 
 import os
 import secrets
+import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
 import praw
 
-from .secrets_store import keyring_get, keyring_store
+from . import DEFAULT_USER_AGENT
+from .secrets_store import keyring_available, keyring_get, keyring_store
 
 REDIRECT_HOST = "localhost"
 DEFAULT_REDIRECT_PORT = 8080
+CALLBACK_TIMEOUT_SECS = 300
 
 
 def _redirect_uri(port: int) -> str:
@@ -51,25 +54,26 @@ def _resolve_port(port: int | None) -> int:
 #   save     -> save() / unsave()
 SCOPES = ["identity", "history", "read", "save"]
 
-DEFAULT_USER_AGENT = "linux:reddit-migration:1.0 (by /u/your_username)"
-
 
 class _CallbackHandler(BaseHTTPRequestHandler):
+    expected_state: str | None = None
     result: dict = {}
 
     def do_GET(self):
-        _CallbackHandler.result = {
-            k: v[0] for k, v in parse_qs(urlparse(self.path).query).items()
-        }
+        result = {k: v[0] for k, v in parse_qs(urlparse(self.path).query).items()}
+        matched = result.get("state") == _CallbackHandler.expected_state
+        if matched:
+            _CallbackHandler.result = result
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.end_headers()
-        ok = "code" in _CallbackHandler.result and "error" not in _CallbackHandler.result
-        msg = (
-            "Authorized. You can close this tab and return to the terminal."
-            if ok
-            else "Authorization failed or was denied — check the terminal."
-        )
+        ok = matched and "error" not in result
+        if ok:
+            msg = "Authorized. You can close this tab and return to the terminal."
+        elif matched:
+            msg = "Authorization failed or was denied — check the terminal."
+        else:
+            msg = "Waiting for the Reddit authorization redirect."
         self.wfile.write(f"<html><body><h2>{msg}</h2></body></html>".encode())
 
     def log_message(self, *args):
@@ -86,13 +90,25 @@ def _bind_callback_server(port: int) -> HTTPServer:
         )
 
 
-def _wait_for_callback(server: HTTPServer) -> dict:
+def _wait_for_callback(server: HTTPServer, state: str) -> dict:
+    _CallbackHandler.expected_state = state
+    _CallbackHandler.result = {}
+    deadline = time.monotonic() + CALLBACK_TIMEOUT_SECS
     with server:
-        server.handle_request()  # blocks until exactly one request is handled
+        # Ignore unrelated requests (browser probes, favicon, another local
+        # program) and keep waiting for the redirect that carries our state.
+        while not _CallbackHandler.result:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise SystemExit("Timed out waiting for the Reddit authorization redirect.")
+            server.timeout = remaining
+            server.handle_request()
     return _CallbackHandler.result
 
 
-def _authorize_account(label: str, client_id: str, user_agent: str, port: int) -> str:
+def _authorize_account(
+    label: str, client_id: str, user_agent: str, port: int
+) -> tuple[str, str]:
     reddit = praw.Reddit(
         client_id=client_id,
         client_secret=None,          # installed apps have no secret
@@ -113,7 +129,7 @@ def _authorize_account(label: str, client_id: str, user_agent: str, port: int) -
     print(f"  {url}\n")
     webbrowser.open(url)
 
-    result = _wait_for_callback(server)
+    result = _wait_for_callback(server, state)
 
     if "error" in result:
         raise SystemExit(f"Reddit returned an error: {result['error']}")
@@ -124,8 +140,9 @@ def _authorize_account(label: str, client_id: str, user_agent: str, port: int) -
         raise SystemExit("No authorization code was received.")
 
     refresh_token = reddit.auth.authorize(code)  # also arms this instance
-    print(f"Authorized as u/{reddit.user.me()}")
-    return refresh_token
+    username = str(reddit.user.me())
+    print(f"Authorized as u/{username}")
+    return refresh_token, username
 
 
 def run_login(port: int | None = None) -> int:
@@ -144,6 +161,11 @@ def run_login(port: int | None = None) -> int:
 
     port = _resolve_port(port)
 
+    if not keyring_available():
+        raise SystemExit(
+            "GNOME Keyring is not available or is locked. Unlock it, then run --login again."
+        )
+
     print(f"\nRedirect URI: {_redirect_uri(port)}  (must match your Reddit app exactly)")
     print(
         "\nReddit keeps only one account logged in per browser session, so:\n"
@@ -153,7 +175,11 @@ def run_login(port: int | None = None) -> int:
     )
 
     input("\nStep 1/2 — log into ACCOUNT 1 (source), then press Enter...")
-    rt1 = _authorize_account("ACCOUNT 1 (source)", client_id, user_agent, port)
+    rt1, username1 = _authorize_account("ACCOUNT 1 (source)", client_id, user_agent, port)
+
+    # Replace the placeholder with the real account so Reddit can identify the user.
+    if "your_username" in user_agent:
+        user_agent = DEFAULT_USER_AGENT.replace("your_username", username1)
 
     # Persist account 1's credentials immediately, so a failure while authorizing
     # account 2 doesn't discard the token we just obtained.
@@ -162,7 +188,13 @@ def run_login(port: int | None = None) -> int:
     keyring_store("REDDIT_ACCOUNT1_REFRESH_TOKEN", rt1, "Reddit migrator: acct1 refresh")
 
     input("\nStep 2/2 — log into ACCOUNT 2 (destination), then press Enter...")
-    rt2 = _authorize_account("ACCOUNT 2 (destination)", client_id, user_agent, port)
+    rt2, username2 = _authorize_account("ACCOUNT 2 (destination)", client_id, user_agent, port)
+
+    if username1.casefold() == username2.casefold():
+        raise SystemExit(
+            "Both authorizations are for the same Reddit account. "
+            "Authorize account 2 in a different browser session, then run --login again."
+        )
 
     keyring_store("REDDIT_ACCOUNT2_REFRESH_TOKEN", rt2, "Reddit migrator: acct2 refresh")
 
